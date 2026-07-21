@@ -2,7 +2,7 @@
 
 @section('content')
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <div><h1 class="h2 mb-1">CPU monitoring</h1><p class="text-body-secondary mb-0">Local monitoring-host samples, collected every minute.</p></div>
+        <div><h1 class="h2 mb-1">CPU monitoring</h1><p class="text-body-secondary mb-0">SSH-collected server samples, scheduled every minute.</p></div>
         <span class="badge text-bg-secondary">{{ $latestMetric?->hostname ?? 'No samples' }}</span>
     </div>
 

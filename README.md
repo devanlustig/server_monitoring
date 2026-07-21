@@ -27,7 +27,20 @@ dashboard queries and retention jobs.
 
 ## CPU monitoring
 
-Run `php artisan monitor:cpu` to collect a local-host sample. The scheduler
-registers this command every minute; run `php artisan schedule:work` during
+Run `php artisan monitor:cpu` to collect a sample from each active server. The scheduler
+registers this command every minute for every active SSH server; run `php artisan schedule:work` during
 local development or configure a production cron task for `schedule:run`.
 View the latest measurements at `/cpu`.
+
+## Server authentication
+
+Servers are managed at `/servers`. Password authentication uses phpseclib v3;
+the username and password are tested before a server is saved. Both SSH
+credentials use Laravel's encrypted casts, so the database stores ciphertext
+rather than plaintext credentials. Connection implementations are selected by
+`authentication_method`, allowing future methods to be added cleanly.
+
+Each successful server save records the remote hostname, operating system,
+kernel, CPU model/core count, total RAM, total disk, and successful connection
+time. `RemoteCommandService` is shared by CPU monitoring and future RAM, disk,
+and service collectors.
