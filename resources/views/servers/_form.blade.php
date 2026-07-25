@@ -3,6 +3,8 @@
     <div class="col-md-6"><label class="form-label">Name</label><input class="form-control" name="name" value="{{ old('name', $server->name) }}" required></div>
     <div class="col-md-6"><label class="form-label">Hostname or IP</label><input class="form-control" name="hostname" value="{{ old('hostname', $server->hostname) }}" required></div>
     <div class="col-md-4"><label class="form-label">SSH port</label><input class="form-control" type="number" name="ssh_port" value="{{ old('ssh_port', $server->ssh_port ?? 22) }}" min="1" max="65535" required></div>
+    <div class="col-md-4"><label class="form-label">PostgreSQL Port</label><input class="form-control"type="number"name="postgres_port"
+        value="{{ old('postgres_port', $server->postgres_port ?? 5432) }}"min="1"max="65535"required></div>
     <div class="col-md-4"><label class="form-label">SSH username</label><input class="form-control" name="ssh_username" value="{{ old('ssh_username', $server->ssh_username) }}" required></div>
     <div class="col-md-4"><label class="form-label">SSH password</label><input class="form-control" type="password" name="ssh_password" {{ $server->exists ? '' : 'required' }} autocomplete="new-password"><div class="form-text">{{ $server->exists ? 'Leave blank to keep the existing password.' : 'Encrypted at rest by Laravel.' }}</div></div>
     <div class="col-md-6"><label class="form-label">Environment</label><input class="form-control" name="environment" value="{{ old('environment', $server->environment) }}"></div>

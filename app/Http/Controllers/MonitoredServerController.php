@@ -20,7 +20,16 @@ class MonitoredServerController extends Controller
 
     public function index(): View
     {
-        return view('servers.index', ['servers' => MonitoredServer::query()->latest()->paginate(15)]);
+        $servers = MonitoredServer::query()
+            ->with([
+                'cpuMetrics' => fn ($q) => $q->latest('collected_at')->limit(1),
+                'memoryMetrics' => fn ($q) => $q->latest('collected_at')->limit(1),
+                'diskMetrics' => fn ($q) => $q->latest('collected_at')->limit(1),
+            ])
+            ->latest()
+            ->paginate(15);
+
+        return view('servers.index', compact('servers'));
     }
 
     public function create(): View
@@ -30,16 +39,36 @@ class MonitoredServerController extends Controller
 
     public function show(MonitoredServer $server): View
     {
-        return view('servers.show', ['server' => $server, 'latestMetric' => $server->cpuMetrics()->latest('collected_at')->first()]);
+        return view('servers.show', [
+
+            'server' => $server,
+
+            'latestMetric' => $server
+                ->cpuMetrics()
+                ->latest('collected_at')
+                ->first(),
+
+            'latestMemory' => $server
+                ->memoryMetrics()
+                ->latest('collected_at')
+                ->first(),
+
+            'latestDisk' => $server
+                ->diskMetrics()
+                ->latest('collected_at')
+                ->first(),
+
+        ]);
     }
 
     public function store(ServerRequest $request): RedirectResponse
     {
-        $server = new MonitoredServer($this->payload($request));
-        $this->ensureConnection($server);
-        $server->save();
+        $server = MonitoredServer::create($this->payload($request));
 
-        return to_route('servers.index')->with('status', 'Server saved after a successful SSH connection test.');
+        $this->ensureConnection($server);
+
+        return to_route('servers.index')
+            ->with('status', 'Server saved.');
     }
 
     public function edit(MonitoredServer $server): View
@@ -76,19 +105,19 @@ class MonitoredServerController extends Controller
         $result = $this->connections->for($server)->test($server);
 
         if (! $result->successful) {
-            throw ValidationException::withMessages(['ssh_username' => $result->message]);
+            throw ValidationException::withMessages([
+                'ssh_username' => $result->message,
+            ]);
         }
 
-        try {
-            $server->fill($this->serverInformation->collect($server));
-        } catch (\Throwable) {
-            throw ValidationException::withMessages(['hostname' => 'SSH connection succeeded, but system information could not be collected.']);
-        }
+        $server->update(
+            $this->serverInformation->collect($server)
+        );
     }
 
     private function payload(ServerRequest $request, ?MonitoredServer $existing = null): array
     {
-        $data = $request->safe()->only(['name', 'hostname', 'ssh_port', 'ssh_username', 'ssh_password', 'environment', 'description']);
+        $data = $request->safe()->only(['name', 'hostname', 'ssh_port','postgres_port', 'ssh_username', 'ssh_password', 'environment', 'description']);
         $data['authentication_method'] = 'ssh_password';
         $data['is_active'] = $request->boolean('is_active');
 

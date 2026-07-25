@@ -5,30 +5,38 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class CpuMetric extends Model
+class MemoryMetric extends Model
 {
-    public const CREATED_AT = null;
-
-    public const UPDATED_AT = null;
+    public $timestamps = false;
 
     protected $fillable = [
 
-    'server_id',
-    'usage_percent',
-    'load_1',
-    'load_5',
-    'load_15',
-    'collected_at',
+        'server_id',
+
+        'total',
+
+        'used',
+
+        'free',
+
+        'shared',
+
+        'cache',
+
+        'available',
+
+        'usage_percent',
+
+        'collected_at',
+
     ];
 
     protected function casts(): array
     {
         return [
-            'usage_percent' => 'decimal:2',
-            'load_1' => 'decimal:2',
-            'load_5' => 'decimal:2',
-            'load_15' => 'decimal:2',
-            'collected_at' => 'immutable_datetime',
+
+            'collected_at'=>'immutable_datetime',
+
         ];
     }
 

@@ -7,47 +7,106 @@ use RuntimeException;
 
 class ServerInformationService
 {
-    public function __construct(private readonly RemoteCommandService $commands) {}
+    public function __construct(
+        private readonly RemoteCommandService $commands
+    ) {}
 
-    /** @return array<string, int|string|\DateTimeInterface|null> */
+    /**
+     * Collect static information from remote server.
+     *
+     * @return array<string,mixed>
+     */
     public function collect(MonitoredServer $server): array
     {
         $result = $this->commands->execute($server, $this->command());
 
         if (! $result->successful || ! is_string($result->output)) {
-            throw new RuntimeException($result->message ?? 'Unable to collect server information.');
+            throw new RuntimeException(
+                $result->message ?? 'Unable to collect server information.'
+            );
         }
 
-        $lines = array_map('trim', preg_split('/\R/', trim($result->output)) ?: []);
-
-        if (count($lines) !== 7) {
-            throw new RuntimeException('The remote server returned incomplete system information.');
-        }
+        $info = $this->parseOutput($result->output);
 
         return [
-            'system_hostname' => $this->text($lines[0]),
-            'operating_system' => $this->text($lines[1]),
-            'kernel_version' => $this->text($lines[2]),
-            'cpu_model' => $this->text($lines[3]),
-            'cpu_core_count' => $this->positiveInteger($lines[4]),
-            'total_ram_bytes' => $this->positiveInteger($lines[5]),
-            'total_disk_bytes' => $this->positiveInteger($lines[6]),
+            'system_hostname'               => $this->string($info['HOSTNAME'] ?? null),
+            'operating_system'             => $this->string($info['OS'] ?? null),
+            'kernel_version'               => $this->string($info['KERNEL'] ?? null),
+            'cpu_model'                    => $this->string($info['CPU_MODEL'] ?? null),
+            'cpu_core_count'               => $this->integer($info['CPU_CORES'] ?? null),
+            'total_ram_bytes'              => $this->integer($info['RAM_BYTES'] ?? null),
+            'total_disk_bytes'             => $this->integer($info['DISK_BYTES'] ?? null),
+
+            // untuk pengembangan berikutnya
+            // 'architecture' => $this->string($info['ARCH'] ?? null),
+            // 'ip_address'   => $this->string($info['IP'] ?? null),
+
             'last_successful_connection_at' => now(),
         ];
     }
 
     private function command(): string
     {
-        return "sh -c 'hostname; if [ -r /etc/os-release ]; then . /etc/os-release; printf \"%s\\n\" \"\${PRETTY_NAME:-unknown}\"; else uname -s; fi; uname -r; awk -F: '\''/model name|Hardware|Processor/ {gsub(/^[ \\t]+/, \"\", \$2); print \$2; exit}'\'' /proc/cpuinfo 2>/dev/null; getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0; awk '\''/MemTotal:/ {print \$2 * 1024; exit}'\'' /proc/meminfo 2>/dev/null; df -Pk 2>/dev/null | awk '\''NR > 1 {total += \$2} END {print total * 1024}'\'''";
+        return <<<'BASH'
+echo "HOSTNAME=$(hostname)"
+
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    echo "OS=${PRETTY_NAME}"
+else
+    echo "OS=$(uname -s)"
+fi
+
+echo "KERNEL=$(uname -r)"
+
+CPU_MODEL=$(lscpu 2>/dev/null | awk -F: '/Model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
+
+if [ -z "$CPU_MODEL" ]; then
+    CPU_MODEL=$(awk -F: '/model name|Hardware|Processor/ {
+        gsub(/^[ \t]+/, "", $2);
+        print $2;
+        exit
+    }' /proc/cpuinfo)
+fi
+
+echo "CPU_MODEL=${CPU_MODEL}"
+
+echo "CPU_CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)"
+
+echo "RAM_BYTES=$(awk '/MemTotal:/ {print $2*1024}' /proc/meminfo)"
+
+echo "DISK_BYTES=$(df -B1 --output=size / | tail -1 | tr -d ' ')"
+BASH;
     }
 
-    private function text(string $value): ?string
+    /**
+     * Parse KEY=VALUE output.
+     */
+    private function parseOutput(string $output): array
     {
-        return $value !== '' ? $value : null;
+        $data = [];
+
+        foreach (preg_split('/\R/', trim($output)) as $line) {
+
+            if (! str_contains($line, '=')) {
+                continue;
+            }
+
+            [$key, $value] = explode('=', $line, 2);
+
+            $data[trim($key)] = trim($value);
+        }
+
+        return $data;
     }
 
-    private function positiveInteger(string $value): ?int
+    private function string(?string $value): ?string
     {
-        return ctype_digit($value) && (int) $value > 0 ? (int) $value : null;
+        return filled($value) ? $value : null;
+    }
+
+    private function integer(?string $value): ?int
+    {
+        return is_numeric($value) ? (int) $value : null;
     }
 }

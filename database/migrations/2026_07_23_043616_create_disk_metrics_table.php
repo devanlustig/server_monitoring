@@ -8,20 +8,23 @@ return new class extends Migration
 {
     public function up(): void
     {
-            Schema::create('cpu_metrics', function (Blueprint $table) {
+        Schema::create('disk_metrics', function (Blueprint $table) {
+
             $table->id();
 
             $table->foreignId('server_id')
-            ->constrained('monitored_servers')
-            ->cascadeOnDelete();
+                ->constrained('monitored_servers')
+                ->cascadeOnDelete();
 
-            $table->decimal('usage_percent',5,2)->nullable();
+            $table->string('hostname');
 
-            $table->decimal('load_1',8,2)->nullable();
+            $table->bigInteger('total');
 
-            $table->decimal('load_5',8,2)->nullable();
+            $table->bigInteger('used');
 
-            $table->decimal('load_15',8,2)->nullable();
+            $table->bigInteger('available');
+
+            $table->decimal('usage_percent',5,2);
 
             $table->timestampTz('collected_at');
 
@@ -29,11 +32,12 @@ return new class extends Migration
                 'server_id',
                 'collected_at'
             ]);
+
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('cpu_metrics');
+        Schema::dropIfExists('disk_metrics');
     }
 };

@@ -6,6 +6,26 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ config('app.name', 'Server Monitoring') }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+
+    <style>
+    .bg-orange{
+        background:#fd7e14 !important;
+        color:#fff !important;
+    }
+    .table-middle td{
+        vertical-align:middle;
+    }
+    .badge-lg{
+        font-size:.85rem;
+        padding:.45rem .75rem;
+        border-radius:50rem;
+    }
+    .query-code{
+        color:#d63384;
+        font-size:.82rem;
+    }
+    </style>
+
 </head>
 <body class="bg-body-tertiary">
     <nav class="navbar navbar-dark bg-dark shadow-sm">
@@ -16,5 +36,6 @@
         </div>
     </nav>
     <main class="container py-4">@yield('content')</main>
+    @stack('scripts')
 </body>
 </html>

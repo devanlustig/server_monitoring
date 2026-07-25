@@ -37,6 +37,12 @@ class ServerRequest extends FormRequest
             'environment' => ['nullable', 'string', 'max:32'],
             'description' => ['nullable', 'string', 'max:2000'],
             'is_active' => ['nullable', 'boolean'],
+
+            'postgres_port' => [
+                    'required',
+                    'integer',
+                    'between:1,65535',
+                ],
         ];
     }
 }
