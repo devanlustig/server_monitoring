@@ -21,7 +21,10 @@ class PostgreSqlService
     |--------------------------------------------------------------------------
     */
 
-    public function terminate(MonitoredServer $server,int $pid,): bool {
+    public function terminate(
+        MonitoredServer $server,
+        int $pid,
+    ): bool {
 
         $checkSql = <<<SQL
         SELECT state
@@ -42,31 +45,30 @@ class PostgreSqlService
             );
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | Jangan terminate connection yang sedang aktif
+        |--------------------------------------------------------------------------
+        */
+
         if (strtolower($state) === 'active') {
             throw new RuntimeException(
                 "PID {$pid} is ACTIVE."
             );
         }
 
-        $sql = <<<SQL
-        SELECT pg_terminate_backend({$pid});
-        SQL;
-
-        logger()->info('Terminate SQL', [
-            'pid' => $pid,
-            'sql' => $sql,
-        ]);
+        $terminateSql = <<<SQL
+SELECT pg_terminate_backend({$pid});
+SQL;
 
         $result = trim(
             $this->runSql(
                 $server,
-                $sql
+                $terminateSql
             )
         );
 
-        logger()->info('Terminate Result', [
-            'result' => $result,
-        ]);
+        //dd($result);
 
         if ($result !== 't') {
             throw new RuntimeException(
@@ -178,43 +180,45 @@ SQL;
 
     public function terminateMany(MonitoredServer $server,array $pids,
     ): int {
-        $count = 0;
+
+        logger()->info('==============================');
+        logger()->info('TERMINATE MANY START');
+        logger()->info([
+            'time'  => now()->toDateTimeString(),
+            'pids'  => $pids,
+            'count' => count($pids),
+        ]);
 
         $pids = array_unique(
-            array_map('intval', $pids)
+            array_filter(
+                array_map('intval', $pids)
+            )
+        );
+        if (empty($pids)) {
+            return 0;
+        }
+        $list = implode(',', $pids);
+        $sql = <<<SQL
+    SELECT pid,pg_terminate_backend(pid)
+    FROM pg_stat_activity
+    WHERE pid IN ({$list}) AND pid <> pg_backend_pid()
+    ORDER BY pid;
+    SQL;
+
+        $result = trim(
+            $this->runSql(
+                $server,
+                $sql
+            )
         );
 
-        logger()->info('TerminateMany START', [
-            'pids' => $pids,
-        ]);
+        logger()->info('TERMINATE MANY RESULT');
+        logger()->info($result);
+        logger()->info('==============================');
 
-        foreach ($pids as $pid) {
-            try {
-                if ($this->terminate($server, (int) $pid)) {
-                    $count++;
-                    logger()->info('Terminate Success', [
-                        'pid' => $pid,
-                        'count' => $count,
-                    ]);
-                }
-
-            } catch (\Throwable $e) {
-
-                logger()->warning(
-                    'Terminate skipped',
-                    [
-                        'pid' => $pid,
-                        'error' => $e->getMessage(),
-                    ]
-                );
-            }
-        }
-
-        logger()->info('TerminateMany FINISH', [
-            'count' => $count,
-        ]);
-
-        return $count;
+        return $this->countSuccessfulTerminate(
+            $result
+        );
     }
 
 
@@ -367,50 +371,6 @@ SQL;
         }
         return $rows;
 
-    }
-
-    public function restart(MonitoredServer $server,): bool {
-
-        logger()->info(
-            'Restart PostgreSQL Service',
-            [
-                'server' => $server->name,
-            ]
-        );
-
-        $result = $this->commands->execute(
-            $server,
-            'sudo systemctl restart postgresql'
-        );
-
-        if (! $result->successful) {
-            throw new RuntimeException(
-                $result->message ??
-                'Restart PostgreSQL failed.'
-            );
-        }
-        /*
-        | Verifikasi Service
-        */
-        $status = $this->commands->execute(
-            $server,
-            'systemctl is-active postgresql'
-        );
-        if (
-            ! $status->successful ||
-            trim($status->output) !== 'active'
-        ) {
-            throw new RuntimeException(
-                'PostgreSQL service is not active.'
-            );
-        }
-        logger()->info(
-            'Restart PostgreSQL Success',
-            [
-                'status' => trim($status->output),
-            ]
-        );
-        return true;
     }
 
 }

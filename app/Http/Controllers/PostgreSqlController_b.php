@@ -141,19 +141,159 @@ class PostgreSqlController extends Controller
         ]);
     }
 
-    public function terminate(MonitoredServer $server,int $pid,PostgreSqlService $postgres,)
+    public function terminate(MonitoredServer $server,int $pid,
+        PostgreSqlService $postgres,
+        PostgreSqlIncidentService $incident,
+    )
     {
-        $result = $postgres->terminate(
-            $server,
-            $pid
+        logger()->info('==============================');
+        logger()->info('POSTGRES TERMINATE START');
+        logger()->info([
+            'server' => $server->name,
+            'pid'    => $pid,
+            'time'   => now()->toDateTimeString(),
+        ]);
+        /*
+        BEFORE SNAPSHOT
+        */
+
+        $beforeCount = $postgres->connectionCount(
+            $server
         );
 
-        if (! $result) {
+        logger()->info('Connection Count Before', [
+            'count' => $beforeCount,
+        ]);
+
+        $topBefore = $postgres->topClients(
+            $server
+        );
+
+        logger()->info(
+            'Top Client Before',
+            $topBefore
+        );
+
+        try {
+
+            $before = $incident->captureSnapshot(
+                $server,
+                'before_terminate'
+            );
+
+            logger()->info('Before Snapshot', [
+                'file' => $before,
+            ]);
+
+        } catch (\Throwable $e) {
+
+            logger()->error('Before Snapshot Failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+        }
+
+        /*
+        TERMINATE
+        */
+
+        logger()->info(
+            'Top Application Before',
+            $postgres->topApplications($server)
+        );
+
+        try {
+
+            $result = $postgres->terminate(
+                $server,
+                $pid
+            );
+
+            logger()->info('Terminate Result', [
+                'result' => $result,
+            ]);
+
+        } catch (\Throwable $e) {
+
+            logger()->error('Terminate Failed', [
+                'message' => $e->getMessage(),
+            ]);
+
             return back()->with(
                 'error',
-                'Terminate failed.'
+                'Terminate failed : ' . $e->getMessage()
             );
         }
+
+        logger()->info(
+            'Top Application After',
+            $postgres->topApplications($server)
+        );
+
+        /*
+        WAIT
+        */
+        sleep(2);
+
+        try {
+            $afterCount = $postgres->connectionCount(
+                $server
+            );
+            logger()->info('Connection Count After', [
+                'count' => $afterCount,
+            ]);
+        } catch (\Throwable $e) {
+            logger()->error(
+                'Connection Count After Failed',
+                [
+                    'message' => $e->getMessage(),
+                ]
+            );
+        }
+
+        try {
+
+            $topAfter = $postgres->topClients(
+                $server
+            );
+            logger()->info(
+                'Top Client After',
+                $topAfter
+            );
+
+        } catch (\Throwable $e) {
+            logger()->error(
+                'Top Client After Failed',
+                [
+                    'message' => $e->getMessage(),
+                ]
+            );
+        }
+
+        /*
+        AFTER SNAPSHOT
+        */
+        try {
+
+            $after = $incident->captureSnapshot(
+                $server,
+                'after_terminate'
+            );
+
+            logger()->info('After Snapshot', [
+                'file' => $after,
+            ]);
+
+        } catch (\Throwable $e) {
+
+            logger()->error('After Snapshot Failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+        }
+
+        logger()->info('POSTGRES TERMINATE FINISHED');
+        logger()->info('==============================');
 
         return back()->with(
             'success',
@@ -213,46 +353,19 @@ class PostgreSqlController extends Controller
 
     public function killSelected(Request $request,MonitoredServer $server,PostgreSqlService $postgres,)
     {
-
-        logger()->info('HTTP REQUEST KILL MULTIPLE',
-            [
-                'server' => $server->name,
-                'pids' => $request->input('pids', []),
-            ]
-        );
-
-        $pids = $request->input(
-        'pids',
-            []
-        );
-
-        if (empty($pids)) {
-            return back()->with(
-                'warning',
-                'No connection selected.'
-            );
-        }
-        
+        logger()->info('HTTP REQUEST KILL MULTIPLE');
         $count = $postgres->terminateMany(
             $server,
-            $pids
+            $request->input(
+                'pids',
+                []
+            )
         );
-
         return back()->with(
             'success',
             "{$count} connection(s) terminated."
         );
 
-    }
-
-    public function restart(MonitoredServer $server,PostgreSqlService $postgres,)
-    {
-        $postgres->restart($server);
-
-        return back()->with(
-            'success',
-            'PostgreSQL service restarted successfully.'
-        );
     }
 
 

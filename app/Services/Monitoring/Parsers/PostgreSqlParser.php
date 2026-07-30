@@ -9,40 +9,67 @@ class PostgreSqlParser
 {
     public function parse(string $output): PostgreSqlSummaryData
     {
-        $lines = array_filter(
-            preg_split('/\R/', trim($output))
+        logger()->debug(
+        'RAW SUMMARY',
+            [
+                'output' => $output,
+            ]
         );
-        // Ambil baris terakhir (hasil psql)
-        $output = trim(end($lines));
+
+        $output = trim($output);
 
         if ($output === '') {
-            throw new RuntimeException(
-                'Empty PostgreSQL response.'
+            logger()->error(
+                'PostgreSQL Summary Empty',
+                [
+                    'output' => $output,
+                ]
+            );
+
+            return new PostgreSqlSummaryData(
+                running: false,
+                currentConnections: 0,
+                maxConnections: 0,
+                usagePercent: 0,
+                activeConnections: 0,
+                idleConnections: 0,
+                idleInTransactionConnections: 0,
+                databaseSize: '-',
             );
         }
 
         $parts = explode('|', $output);
-
         if (count($parts) !== 6) {
-            throw new RuntimeException(
-                'Invalid PostgreSQL summary output.'
+
+            logger()->error(
+                'Invalid PostgreSQL summary output',
+                [
+                    'output' => $output,
+                    'parts' => $parts,
+                ]
+            );
+            return new PostgreSqlSummaryData(
+                running: false,
+                currentConnections: 0,
+                maxConnections: 0,
+                usagePercent: 0,
+                activeConnections: 0,
+                idleConnections: 0,
+                idleInTransactionConnections: 0,
+                databaseSize: '-',
             );
         }
 
-        $current = (int) $parts[0];
-        $max = (int) $parts[1];
-        $active = (int) $parts[2];
-        $idle = (int) $parts[3];
-        $idleTransaction = (int) $parts[4];
-
         return new PostgreSqlSummaryData(
             running: true,
-            currentConnections: $current,
-            maxConnections: $max,
-            usagePercent: round(($current / max($max, 1)) * 100, 2),
-            activeConnections: $active,
-            idleConnections: $idle,
-            idleInTransactionConnections: $idleTransaction,
+            currentConnections: (int) $parts[0],
+            maxConnections: (int) $parts[1],
+            usagePercent: (int) $parts[1] > 0
+                ? round(((int) $parts[0] / (int) $parts[1]) * 100, 2)
+                : 0,
+            activeConnections: (int) $parts[2],
+            idleConnections: (int) $parts[3],
+            idleInTransactionConnections: (int) $parts[4],
             databaseSize: trim($parts[5]),
         );
     }

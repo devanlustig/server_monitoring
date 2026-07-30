@@ -4,6 +4,7 @@ use App\Http\Controllers\CpuDashboardController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MonitoredServerController;
 use App\Http\Controllers\PostgreSqlController;
+use App\Http\Controllers\PostgreSqlIncidentController;
 use Illuminate\Support\Facades\Route;
 use App\Models\MonitoredServer;
 use App\Services\Monitoring\Collectors\CpuCollector;
@@ -18,3 +19,5 @@ Route::post('/servers/{server}/postgresql/{pid}/terminate',[PostgreSqlController
 Route::post('/servers/{server}/postgresql/kill-idle',[PostgreSqlController::class,'killIdle'])->name('servers.postgresql.killIdle');
 Route::post('/servers/{server}/postgresql/kill-idle-older',[PostgreSqlController::class,'killIdleOlder'])->name('servers.postgresql.killIdleOlder');
 Route::post('/servers/{server}/postgresql/kill-selected',[PostgreSqlController::class,'killSelected'])->name('servers.postgresql.killSelected');
+Route::post('/servers/{server}/postgresql/capture',[PostgreSqlIncidentController::class,'capture'])->name('servers.postgresql.capture');
+Route::post('/servers/{server}/postgresql/restart',[PostgreSqlController::class, 'restart'])->name('servers.postgresql.restart');

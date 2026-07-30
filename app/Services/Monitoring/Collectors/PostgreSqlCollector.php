@@ -34,7 +34,16 @@ class PostgreSqlCollector
             );
         }
         //dd($result->output);
-        return $this->parser->parse($result->output);
+        logger()->debug(
+            'PostgreSQL Summary Raw',
+            [
+                'output' => $result->output,
+            ]
+        );
+
+        return $this->parser->parse(
+            $result->output
+        );
     }
 
     private function sql(): string
