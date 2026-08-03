@@ -5,12 +5,16 @@ namespace App\Services\Monitoring\Connections;
 use App\Domain\Monitoring\Connections\ServerConnection;
 use App\Domain\Monitoring\Data\ConnectionTestResult;
 use App\Domain\Monitoring\Data\RemoteCommandResult;
+use App\Domain\Monitoring\Data\BatchCommandResult;
 use App\Models\MonitoredServer;
 use phpseclib3\Net\SSH2;
 use Throwable;
 
 class SshPasswordConnection implements ServerConnection
 {
+    private ?SSH2 $ssh = null;
+    private ?int $connectedServerId = null;
+
     public function test(MonitoredServer $server): ConnectionTestResult
     {
         try {
@@ -44,4 +48,53 @@ class SshPasswordConnection implements ServerConnection
 
         return $ssh;
     }
+
+    public function executeMany(
+        MonitoredServer $server,
+        array $commands
+    ): BatchCommandResult {
+
+        $ssh = $this->connect($server);
+
+        $script = '';
+
+        foreach ($commands as $key => $command) {
+
+            $script .= "echo '__BEGIN__{$key}__'\n";
+            $script .= "(\n";
+            $script .= $command . "\n";
+            $script .= ")\n";
+            $script .= "echo '__END__{$key}__'\n";
+
+        }
+
+        logger()->info('Batch Script', [
+            'script' => $script,
+        ]);
+
+        $output = $ssh->exec($script);
+
+        return new BatchCommandResult(
+            $this->parseBatchOutput($output)
+        );
+    }
+
+    private function parseBatchOutput(
+        string $output
+    ): array {
+
+        $results = [];
+        preg_match_all(
+            '/__BEGIN__(.*?)__([\s\S]*?)__END__\\1__/',
+            $output,
+            $matches,
+            PREG_SET_ORDER
+        );
+        foreach ($matches as $match) {
+            $results[$match[1]] = trim($match[2]);
+
+        }
+        return $results;
+    }
+
 }

@@ -20,3 +20,14 @@ Route::post('/servers/{server}/postgresql/kill-selected', [PostgreSqlController:
 Route::post('/servers/{server}/postgresql/capture', [PostgreSqlIncidentController::class, 'capture'])->name('servers.postgresql.capture');
 Route::post('/servers/{server}/postgresql/restart', [PostgreSqlController::class, 'restart'])->name('servers.postgresql.restart');
 Route::get('/servers/{server}/status', [MonitoredServerController::class, 'status'])->name('servers.status');
+Route::get('/test-ssh-many', function (\App\Services\Monitoring\RemoteCommandService $remote
+) {
+
+    $server = \App\Models\MonitoredServer::find(1);
+    return $remote->executeMany($server, [
+        'date' => 'date',
+        'whoami' => 'whoami',
+        'hostname' => 'hostname',
+    ]);
+
+});

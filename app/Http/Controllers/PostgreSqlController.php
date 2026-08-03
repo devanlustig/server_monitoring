@@ -7,44 +7,60 @@ use App\Services\Monitoring\Collectors\PostgreSqlCollector;
 use App\Services\Monitoring\Collectors\PostgreSqlConnectionCollector;
 use App\Services\Monitoring\PostgreSqlService;
 use App\Services\Monitoring\PostgreSqlIncidentService;
+use App\Services\Monitoring\RemoteCommandService;
 use Illuminate\View\View;
 use Illuminate\Http\Request;
 
 class PostgreSqlController extends Controller
 {
-    public function show(MonitoredServer $server,PostgreSqlCollector $summaryCollector,
-        PostgreSqlConnectionCollector $connectionCollector,
+
+    public function __construct(
+        private readonly RemoteCommandService $commands
+    ) {
+    }
+
+    public function show(MonitoredServer $server,PostgreSqlCollector $summaryCollector,PostgreSqlConnectionCollector $connectionCollector,
         PostgreSqlIncidentService $incident,
     ): View {
-        $connections = $connectionCollector->collect($server);
+
+        $controllerStart = microtime(true);
+
         /*
-        |--------------------------------------------------------------------------
-        | Filter
-        |--------------------------------------------------------------------------
+        | Collect Data
         */
-        $connections = collect($connections);
+        $t = microtime(true);
+        $results = $this->commands->executeMany(
+            $server,
+            [
+                'summary'     => $summaryCollector->command($server),
+                'connections' => $connectionCollector->command($server),
+            ]
+        );
+        $summary = $summaryCollector->parseOutput(
+            $results->get('summary')
+        );
+        $connections = collect(
+            $connectionCollector->parseOutput(
+                $results->get('connections')
+            )
+        );
+        logger()->info('Controller Collect Data', [
+            'ms' => round((microtime(true) - $t) * 1000, 2),
+        ]);
 
+        /*
+        | Filter
+        */
+        $t = microtime(true);
         if ($client = request('client')) {
-            $connections = $connections->where(
-                'client',
-                $client
-            );
+            $connections = $connections->where('client', $client);
         }
-
         if ($application = request('application')) {
-            $connections = $connections->where(
-                'application',
-                $application
-            );
+            $connections = $connections->where('application', $application);
         }
-
         if ($database = request('database')) {
-            $connections = $connections->where(
-                'database',
-                $database
-            );
+            $connections = $connections->where('database', $database);
         }
-
         if ($state = request('state')) {
             $connections = $connections->where(
                 'state',
@@ -52,93 +68,135 @@ class PostgreSqlController extends Controller
             );
         }
 
-        $connections = $connections->values()->all();
+        logger()->info('Controller Filter', [
+            'ms' => round((microtime(true) - $t) * 1000, 2),
+        ]);
 
+        /*
+        | Sort
+        */
+        $t = microtime(true);
+        $sortedConnections = $connections
+            ->values()
+            ->all();
         $sort = request('sort', 'activityDuration');
         $direction = request('direction', 'desc');
-        usort($connections, function ($a, $b) use ($sort, $direction) {
+
+        usort($sortedConnections, function ($a, $b) use ($sort, $direction) {
             $left = data_get($a, $sort);
             $right = data_get($b, $sort);
-
             if ($sort === 'connectionAge') {
                 $left = $a->connectionAgeInSeconds();
                 $right = $b->connectionAgeInSeconds();
             }
-
             if ($sort === 'activityDuration') {
                 $left = $a->activityDurationInSeconds();
                 $right = $b->activityDurationInSeconds();
             }
-
-            if ($direction === 'asc') {
-                return $left <=> $right;
-            }
-            return $right <=> $left;
+            return $direction === 'asc'
+                ? $left <=> $right
+                : $right <=> $left;
         });
 
-            /*
-            |--------------------------------------------------------------------------
-            | Analytics
-            |--------------------------------------------------------------------------
-            */
+        $connections = collect($sortedConnections);
+        logger()->info('Controller Sort', [
+            'ms' => round((microtime(true) - $t) * 1000, 2),
+        ]);
 
-            $topClient = collect($connections)
-                ->groupBy('client')
-                ->map->count()
-                ->sortDesc()
-                ->take(5);
+        /*
+        | Analytics
+        */
+        $t = microtime(true);
+        $topClient = $connections
+            ->groupBy('client')
+            ->map
+            ->count()
+            ->sortDesc()
+            ->take(5);
 
-            $topApplication = collect($connections)
-                ->groupBy(function ($item) {
+        $topApplication = $connections
+            ->groupBy(fn ($item) =>
+                blank($item->application)
+                    ? 'Unknown'
+                    : $item->application
+            )
+            ->map
+            ->count()
+            ->sortDesc()
+            ->take(5);
 
-                    return blank($item->application)
-                        ? 'Unknown'
-                        : $item->application;
+        $oldestConnection = $connections
+            ->sortByDesc(fn ($c) => $c->connectionAgeInSeconds())
+            ->first();
 
-                })
-                ->map->count()
-                ->sortDesc()
-                ->take(5);
+        $longestIdle = $connections
+            ->filter(fn ($c) => strtolower($c->state) === 'idle')
+            ->sortByDesc(fn ($c) => $c->activityDurationInSeconds())
+            ->first();
 
-            $oldestConnection = collect($connections)
-                ->sortByDesc(fn ($c) => $c->connectionAgeInSeconds())
-                ->first();
+        logger()->info('Controller Analytics', [
+            'ms' => round((microtime(true) - $t) * 1000, 2),
+        ]);
 
-            $longestIdle = collect($connections)
-                ->filter(fn ($c) => strtolower($c->state) === 'idle')
-                ->sortByDesc(fn ($c) => $c->activityDurationInSeconds())
-                ->first();
+        /*
+        | Filter Dropdown
+        */
+        $t = microtime(true);
 
-            $clients = collect($connectionCollector->collect($server))
+        $clients = $connections
             ->pluck('client')
+            ->filter()
             ->unique()
             ->sort()
             ->values();
 
-            $applications = collect($connectionCollector->collect($server))
-                            ->pluck('application')
-                            ->unique()
-                            ->sort()
-                            ->values();
+        $applications = $connections
+            ->pluck('application')
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values();
 
-            $databases = collect($connectionCollector->collect($server))
-                        ->pluck('database')
-                        ->unique()
-                        ->sort()
-                        ->values();
+        $databases = $connections
+            ->pluck('database')
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values();
 
-        return view('servers.postgresql', [
+        logger()->info('Controller Dropdown', [
+            'ms' => round((microtime(true) - $t) * 1000, 2),
+        ]);
+
+        /*
+        | View
+        */
+        $t = microtime(true);
+
+        $view = view('servers.postgresql', [
+
             'server' => $server,
-            'summary' => $summaryCollector->collect($server),
-            'connections' => $connections,
+            'summary' => $summary,
+            'connections' => $connections->all(),
             'topClient' => $topClient,
             'topApplication' => $topApplication,
             'oldestConnection' => $oldestConnection,
             'longestIdle' => $longestIdle,
-            'clients'=>$clients,
-            'applications'=>$applications,
-            'databases'=>$databases,
+            'clients' => $clients,
+            'applications' => $applications,
+            'databases' => $databases,
+
         ]);
+
+        logger()->info('Controller Create View', [
+            'ms' => round((microtime(true) - $t) * 1000, 2),
+        ]);
+
+        logger()->info('Controller TOTAL', [
+            'ms' => round((microtime(true) - $controllerStart) * 1000, 2),
+        ]);
+
+        return $view;
     }
 
     public function terminate(MonitoredServer $server,int $pid,PostgreSqlService $postgres,)

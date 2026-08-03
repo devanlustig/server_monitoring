@@ -59,4 +59,17 @@ class PostgreSqlCollector
     FROM pg_stat_activity;
     SQL;
     }
+
+    public function command(MonitoredServer $server): string
+    {
+        return $this->builder->build(
+            $server,
+            $this->sql()
+        );
+    }
+
+    public function parseOutput(string $output): PostgreSqlSummaryData
+    {
+        return $this->parser->parse($output);
+    }
 }

@@ -83,4 +83,21 @@ class PostgreSqlConnectionCollector
         now()-state_change DESC;
     SQL;
     }
+
+    public function command(MonitoredServer $server
+    ): string
+    {
+        return $this->builder->build(
+            $server,
+            $this->sql()
+        );
+    }
+
+    public function parseOutput(string $output
+    ): array
+    {
+        return $this->parser->parse(
+            $output
+        );
+    }
 }
