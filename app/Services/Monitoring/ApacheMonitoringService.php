@@ -218,6 +218,88 @@ class ApacheMonitoringService
             'data' => array_values($timelineMinutes),
         ];
 
+        // 1. Success & Error Rates
+        $totalErrors = $http4xx + $http5xx;
+        $totalSuccesses = $http2xx + $http3xx;
+        $errorRate = $totalRequests > 0 ? round(($totalErrors / $totalRequests) * 100, 2) : 0.0;
+        $successRate = $totalRequests > 0 ? round(($totalSuccesses / $totalRequests) * 100, 2) : 100.0;
+
+        // 2. Slow Request Count (>500ms)
+        $slowRequestCount = $between500and1000ms + $over1000ms;
+
+        // 3. Peak Request Minute & Average Request Minute
+        $peakMinuteKey = '-';
+        $peakCount = 0;
+        foreach ($timelineMinutes as $min => $cnt) {
+            if ($cnt > $peakCount) {
+                $peakCount = $cnt;
+                $peakMinuteKey = $min;
+            }
+        }
+        $peakRequestMinute = ['minute' => $peakMinuteKey, 'count' => $peakCount];
+        $highestTrafficMinute = $peakRequestMinute; // Peak request minute represents highest volume minute
+        $averageRequestMinute = count($timelineMinutes) > 0 ? round(array_sum($timelineMinutes) / count($timelineMinutes), 2) : $requestsPerMinute;
+
+        // 4. Health Score Calculation (0 - 100)
+        $healthScore = 100.0;
+        if ($totalRequests > 0) {
+            $p5xx = ($http5xx / $totalRequests) * 100;
+            $p4xx = ($http4xx / $totalRequests) * 100;
+            $pSlow = ($over1000ms / $totalRequests) * 100;
+
+            $healthScore -= ($p5xx * 5.0); // Penalty for 5xx errors
+            $healthScore -= ($p4xx * 1.5); // Penalty for 4xx errors
+            $healthScore -= ($pSlow * 2.0); // Penalty for very slow requests (>1s)
+
+            if ($averageResponseTimeMs !== null && $averageResponseTimeMs > 500) {
+                $healthScore -= 10.0;
+            }
+        }
+        $healthScore = max(0.0, min(100.0, round($healthScore, 1)));
+
+        // 5. Smart Recommendations
+        $recommendations = [];
+        if ($http5xx > 0) {
+            $recommendations[] = [
+                'type' => 'danger',
+                'icon' => 'bi-exclamation-octagon-fill',
+                'title' => 'Server Error Detected',
+                'message' => "Terdeteksi <strong>{$http5xx}</strong> request dengan status HTTP 5xx. Periksa error log aplikasi backend.",
+            ];
+        }
+        if ($errorRate > 5.0) {
+            $recommendations[] = [
+                'type' => 'warning',
+                'icon' => 'bi-exclamation-triangle-fill',
+                'title' => 'Tingkat Error Tinggi',
+                'message' => "Error rate mencapai <strong>{$errorRate}%</strong>. Tinjau tabel <em>Error Endpoints</em> untuk mendeteksi link rusak atau 404.",
+            ];
+        }
+        if ($over1000ms > 0) {
+            $recommendations[] = [
+                'type' => 'warning',
+                'icon' => 'bi-hourglass-bottom',
+                'title' => 'Request Lambat (> 1 Detik)',
+                'message' => "Terdapat <strong>{$over1000ms}</strong> request dengan response time lebih dari 1 detik. Pertimbangkan optimasi query database atau caching.",
+            ];
+        }
+        if ($hasResponseTime && $averageResponseTimeMs > 500) {
+            $recommendations[] = [
+                'type' => 'info',
+                'icon' => 'bi-speedometer2',
+                'title' => 'Waktu Respon Cukup Tinggi',
+                'message' => "Rata-rata waktu respon adalah <strong>{$averageResponseTimeMs} ms</strong>. Periksa slow endpoints untuk analisa beban server.",
+            ];
+        }
+        if (empty($recommendations)) {
+            $recommendations[] = [
+                'type' => 'success',
+                'icon' => 'bi-check-circle-fill',
+                'title' => 'Sistem Berjalan Optimal',
+                'message' => "Kinerja web server Apache dalam kondisi baik dengan Health Score <strong>{$healthScore}%</strong> dan Success Rate <strong>{$successRate}%</strong>.",
+            ];
+        }
+
         return new ApacheMetricsData(
             totalRequests: $totalRequests,
             requestsPerMinute: $requestsPerMinute,
@@ -243,6 +325,14 @@ class ApacheMonitoringService
                 'over1000ms' => $over1000ms,
             ],
             requestTimeline: $requestTimeline,
+            healthScore: $healthScore,
+            errorRate: $errorRate,
+            successRate: $successRate,
+            slowRequestCount: $slowRequestCount,
+            peakRequestMinute: $peakRequestMinute,
+            averageRequestMinute: $averageRequestMinute,
+            highestTrafficMinute: $highestTrafficMinute,
+            recommendations: $recommendations,
             entries: $entries,
         );
     }

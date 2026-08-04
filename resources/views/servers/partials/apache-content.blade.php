@@ -21,6 +21,91 @@
 </div>
 @endif
 
+<!-- Row 0: Health Score & High Level Analytics Cards -->
+<div class="row g-4 mb-4">
+    <!-- Health Score -->
+    <div class="col-md-3">
+        <div class="card stat-card shadow-sm h-100 bg-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="text-muted fw-bold text-uppercase small tracking-wide">Health Score</div>
+                    <div class="stat-icon bg-{{ $metrics->healthScore >= 90 ? 'success' : ($metrics->healthScore >= 75 ? 'warning' : 'danger') }} bg-opacity-10 text-{{ $metrics->healthScore >= 90 ? 'success' : ($metrics->healthScore >= 75 ? 'warning' : 'danger') }}">
+                        <i class="bi bi-heart-pulse-fill"></i>
+                    </div>
+                </div>
+                <div class="d-flex align-items-baseline gap-2">
+                    <h3 class="fw-bold mb-0 text-dark">{{ number_format($metrics->healthScore, 1) }}%</h3>
+                    <span class="badge bg-{{ $metrics->healthScore >= 90 ? 'success' : ($metrics->healthScore >= 75 ? 'warning' : 'danger') }} bg-opacity-10 text-{{ $metrics->healthScore >= 90 ? 'success' : ($metrics->healthScore >= 75 ? 'warning' : 'danger') }} border border-{{ $metrics->healthScore >= 90 ? 'success' : ($metrics->healthScore >= 75 ? 'warning' : 'danger') }} border-opacity-25 px-2 py-1">
+                        {{ $metrics->healthScore >= 90 ? 'Excellent' : ($metrics->healthScore >= 75 ? 'Fair' : 'Critical') }}
+                    </span>
+                </div>
+                <div class="text-muted small mt-2">
+                    Evaluated from Error Rate & Slow Requests
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error & Success Rate -->
+    <div class="col-md-3">
+        <div class="card stat-card shadow-sm h-100 bg-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="text-muted fw-bold text-uppercase small tracking-wide">Error & Success Rate</div>
+                    <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                        <i class="bi bi-shield-check"></i>
+                    </div>
+                </div>
+                <div class="d-flex align-items-baseline gap-2">
+                    <h3 class="fw-bold mb-0 text-success">{{ number_format($metrics->successRate, 1) }}%</h3>
+                    <span class="text-muted small">Success</span>
+                </div>
+                <div class="text-muted small mt-2 d-flex align-items-center justify-content-between">
+                    <span><i class="bi bi-exclamation-circle text-danger me-1"></i> Error Rate:</span>
+                    <span class="fw-bold text-{{ $metrics->errorRate > 5 ? 'danger' : 'dark' }}">{{ number_format($metrics->errorRate, 1) }}%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Slow Request Count -->
+    <div class="col-md-3">
+        <div class="card stat-card shadow-sm h-100 bg-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="text-muted fw-bold text-uppercase small tracking-wide">Slow Requests (&gt;500ms)</div>
+                    <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+                        <i class="bi bi-hourglass-split"></i>
+                    </div>
+                </div>
+                <h3 class="fw-bold mb-0 text-dark">{{ number_format($metrics->slowRequestCount) }}</h3>
+                <div class="text-muted small mt-2">
+                    <i class="bi bi-info-circle me-1"></i> {{ number_format($metrics->responseTimeDistribution['over1000ms']) }} requests &gt; 1 sec
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Peak & Avg Request Volume -->
+    <div class="col-md-3">
+        <div class="card stat-card shadow-sm h-100 bg-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="text-muted fw-bold text-uppercase small tracking-wide">Peak Minute Volume</div>
+                    <div class="stat-icon bg-info bg-opacity-10 text-info">
+                        <i class="bi bi-lightning-charge-fill"></i>
+                    </div>
+                </div>
+                <h3 class="fw-bold mb-0 text-dark">{{ number_format($metrics->peakRequestMinute['count']) }} <span class="fs-6 fw-normal text-muted">req</span></h3>
+                <div class="text-muted small mt-2 d-flex justify-content-between">
+                    <span><i class="bi bi-clock me-1"></i> Peak at {{ $metrics->peakRequestMinute['minute'] }}</span>
+                    <span>Avg: {{ number_format($metrics->averageRequestMinute, 1) }}/m</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Summary Cards Row -->
 <div class="row g-4 mb-4">
     <div class="col-md-3">
@@ -104,6 +189,34 @@
     </div>
 </div>
 
+<!-- Recommendations Card -->
+@if(!empty($metrics->recommendations))
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3">
+                <h6 class="fw-bold mb-0 text-dark"><i class="bi bi-lightbulb-fill text-warning me-2"></i>System Recommendations & Insights</h6>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    @foreach($metrics->recommendations as $rec)
+                    <div class="col-md-6">
+                        <div class="p-3 border rounded bg-{{ $rec['type'] }} bg-opacity-10 border-{{ $rec['type'] }} border-opacity-25 h-100 d-flex align-items-start gap-3">
+                            <i class="bi {{ $rec['icon'] }} fs-4 text-{{ $rec['type'] }} flex-shrink-0 mt-1"></i>
+                            <div>
+                                <h6 class="fw-bold mb-1 text-dark">{{ $rec['title'] }}</h6>
+                                <div class="small text-secondary">{!! $rec['message'] !!}</div>
+                            </div>
+                        </div>
+                    </div>
+                    @endforeach
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+@endif
+
 <!-- Response Time Distribution -->
 @if($metrics->hasResponseTime)
 <div class="row g-4 mb-4">
@@ -151,15 +264,35 @@
 </div>
 @endif
 
-<!-- Request Timeline Chart -->
-<div class="card shadow-sm border-0 mb-4">
-    <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
-        <h5 class="mb-0 fw-bold"><i class="bi bi-graph-up-arrow text-primary me-2"></i>Request Timeline (Req / Min)</h5>
-        <span class="badge bg-light text-muted border">Realtime Log Sample</span>
+<!-- Charts Row: Timeline & HTTP Status Pie Chart -->
+<div class="row g-4 mb-4">
+    <!-- Request Timeline Line Chart -->
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold"><i class="bi bi-graph-up-arrow text-primary me-2"></i>Request Timeline (Req / Min)</h5>
+                <span class="badge bg-light text-muted border">Realtime Log Sample</span>
+            </div>
+            <div class="card-body">
+                <div style="height: 240px; position: relative;">
+                    <canvas id="apacheTimelineChart"></canvas>
+                </div>
+            </div>
+        </div>
     </div>
-    <div class="card-body">
-        <div style="height: 240px; position: relative;">
-            <canvas id="apacheTimelineChart"></canvas>
+
+    <!-- HTTP Status Code Pie Chart -->
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold"><i class="bi bi-pie-chart text-primary me-2"></i>HTTP Status Pie Chart</h5>
+                <span class="badge bg-light text-muted border">Breakdown</span>
+            </div>
+            <div class="card-body d-flex align-items-center justify-content-center">
+                <div style="height: 240px; width: 100%; position: relative;">
+                    <canvas id="httpStatusPieChart"></canvas>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -227,6 +360,21 @@
                     </thead>
                     <tbody>
                         @forelse($metrics->slowEndpoints as $slow)
+                        @php
+                            $rt = $slow['responseTimeMs'];
+                            $badgeClass = 'bg-secondary text-dark';
+                            if ($rt !== null) {
+                                if ($rt < 300) {
+                                    $badgeClass = 'bg-success bg-opacity-10 text-success border border-success border-opacity-25';
+                                } elseif ($rt <= 500) {
+                                    $badgeClass = 'bg-info bg-opacity-10 text-info border border-info border-opacity-25';
+                                } elseif ($rt <= 1000) {
+                                    $badgeClass = 'bg-warning bg-opacity-10 text-dark border border-warning border-opacity-25';
+                                } else {
+                                    $badgeClass = 'bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25';
+                                }
+                            }
+                        @endphp
                         <tr>
                             <td>
                                 <div class="fw-medium text-truncate" style="max-width: 220px;" title="{{ $slow['endpoint'] }}">
@@ -237,8 +385,10 @@
                             <td class="text-center">
                                 <span class="badge bg-secondary bg-opacity-10 text-dark border">{{ $slow['method'] }}</span>
                             </td>
-                            <td class="text-end fw-bold text-danger">
-                                {{ number_format($slow['responseTimeMs'], 1) }} ms
+                            <td class="text-end fw-bold">
+                                <span class="badge {{ $badgeClass }} px-2 py-1 fs-6">
+                                    {{ number_format($slow['responseTimeMs'], 1) }} ms
+                                </span>
                             </td>
                             <td class="text-center">
                                 <span class="badge bg-{{ $slow['statusCode'] < 400 ? 'success' : ($slow['statusCode'] < 500 ? 'warning' : 'danger') }} bg-opacity-10 text-dark border">
@@ -358,3 +508,4 @@
         </div>
     </div>
 </div>
+

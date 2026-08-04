@@ -23,6 +23,14 @@ class ApacheMetricsData
         public readonly array $errorEndpoints,
         public readonly array $responseTimeDistribution,
         public readonly array $requestTimeline,
+        public readonly float $healthScore = 100.0,
+        public readonly float $errorRate = 0.0,
+        public readonly float $successRate = 100.0,
+        public readonly int $slowRequestCount = 0,
+        public readonly array $peakRequestMinute = ['minute' => '-', 'count' => 0],
+        public readonly float $averageRequestMinute = 0.0,
+        public readonly array $highestTrafficMinute = ['minute' => '-', 'count' => 0],
+        public readonly array $recommendations = [],
         public readonly array $entries = [],
     ) {}
 

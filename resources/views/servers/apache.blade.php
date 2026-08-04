@@ -76,6 +76,7 @@
 @push('scripts')
 <script>
 let apacheTimelineChartInstance = null;
+let httpStatusPieChartInstance = null;
 
 function renderApacheTimelineChart(labels, data) {
     const ctx = document.getElementById('apacheTimelineChart');
@@ -127,10 +128,49 @@ function renderApacheTimelineChart(labels, data) {
     });
 }
 
+function renderHttpStatusPieChart(http2xx, http3xx, http4xx, http5xx) {
+    const ctx = document.getElementById('httpStatusPieChart');
+    if (!ctx) return;
+
+    if (httpStatusPieChartInstance) {
+        httpStatusPieChartInstance.destroy();
+    }
+
+    httpStatusPieChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['2xx Success', '3xx Redirection', '4xx Client Error', '5xx Server Error'],
+            datasets: [{
+                data: [http2xx, http3xx, http4xx, http5xx],
+                backgroundColor: ['#198754', '#0dcaf0', '#ffc107', '#dc3545'],
+                borderWidth: 2,
+                borderColor: '#ffffff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 12, font: { size: 11 } }
+                }
+            }
+        }
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     const initialLabels = @json($metrics->requestTimeline['labels'] ?? []);
     const initialData = @json($metrics->requestTimeline['data'] ?? []);
     renderApacheTimelineChart(initialLabels, initialData);
+
+    renderHttpStatusPieChart(
+        {{ $metrics->http2xx }},
+        {{ $metrics->http3xx }},
+        {{ $metrics->http4xx }},
+        {{ $metrics->http5xx }}
+    );
 
     const refreshUrl = "{{ route('servers.apache.refresh', $server) }}";
     let lastSuccessTimestamp = Date.now();
@@ -173,10 +213,19 @@ document.addEventListener('DOMContentLoaded', function () {
                 document.getElementById('apache-main-content').innerHTML = data.html;
             }
 
-            if (data.metrics && data.metrics.requestTimeline) {
-                renderApacheTimelineChart(
-                    data.metrics.requestTimeline.labels || [],
-                    data.metrics.requestTimeline.data || []
+            if (data.metrics) {
+                if (data.metrics.requestTimeline) {
+                    renderApacheTimelineChart(
+                        data.metrics.requestTimeline.labels || [],
+                        data.metrics.requestTimeline.data || []
+                    );
+                }
+
+                renderHttpStatusPieChart(
+                    data.metrics.http2xx || 0,
+                    data.metrics.http3xx || 0,
+                    data.metrics.http4xx || 0,
+                    data.metrics.http5xx || 0
                 );
             }
 
