@@ -1,0 +1,249 @@
+<?php
+
+namespace App\Services\Monitoring;
+
+use App\Services\Monitoring\DTO\ApacheLogEntryData;
+use App\Services\Monitoring\DTO\ApacheMetricsData;
+
+class ApacheMonitoringService
+{
+    public function analyze(array $parsedResult): ApacheMetricsData
+    {
+        $logFound = $parsedResult['logFound'] ?? false;
+        /** @var ApacheLogEntryData[] $entries */
+        $entries = $parsedResult['entries'] ?? [];
+
+        if (! $logFound || empty($entries)) {
+            return new ApacheMetricsData(
+                totalRequests: 0,
+                requestsPerMinute: 0.0,
+                requestsPerHour: 0.0,
+                totalTrafficBytes: 0,
+                averageResponseTimeMs: null,
+                http2xx: 0,
+                http3xx: 0,
+                http4xx: 0,
+                http5xx: 0,
+                hasResponseTime: false,
+                logFound: $logFound,
+                logPath: null,
+                topEndpoints: [],
+                slowEndpoints: [],
+                topClientIps: [],
+                errorEndpoints: [],
+                responseTimeDistribution: [
+                    'under100ms' => 0,
+                    'between100and300ms' => 0,
+                    'between300and500ms' => 0,
+                    'between500and1000ms' => 0,
+                    'over1000ms' => 0,
+                ],
+                requestTimeline: ['labels' => [], 'data' => []],
+                entries: [],
+            );
+        }
+
+        $totalRequests = count($entries);
+        $totalTrafficBytes = 0;
+        $http2xx = 0;
+        $http3xx = 0;
+        $http4xx = 0;
+        $http5xx = 0;
+        $totalResponseTimeMs = 0.0;
+        $responseTimeCount = 0;
+
+        $under100ms = 0;
+        $between100and300ms = 0;
+        $between300and500ms = 0;
+        $between500and1000ms = 0;
+        $over1000ms = 0;
+
+        $firstTime = null;
+        $lastTime = null;
+
+        $endpointStats = [];
+        $clientStats = [];
+        $errorStats = [];
+        $timelineMinutes = [];
+        $slowEntries = [];
+
+        foreach ($entries as $entry) {
+            $totalTrafficBytes += $entry->bytes;
+
+            // Status Code groups
+            if ($entry->statusCode >= 200 && $entry->statusCode < 300) {
+                $http2xx++;
+            } elseif ($entry->statusCode >= 300 && $entry->statusCode < 400) {
+                $http3xx++;
+            } elseif ($entry->statusCode >= 400 && $entry->statusCode < 500) {
+                $http4xx++;
+            } elseif ($entry->statusCode >= 500 && $entry->statusCode < 600) {
+                $http5xx++;
+            }
+
+            // Timestamps for rate calculation & timeline
+            if ($entry->dateTime) {
+                $ts = $entry->dateTime->getTimestamp();
+                if ($firstTime === null || $ts < $firstTime) {
+                    $firstTime = $ts;
+                }
+                if ($lastTime === null || $ts > $lastTime) {
+                    $lastTime = $ts;
+                }
+
+                $minuteKey = $entry->dateTime->format('H:i');
+                $timelineMinutes[$minuteKey] = ($timelineMinutes[$minuteKey] ?? 0) + 1;
+            }
+
+            // Response time tracking
+            if ($entry->responseTimeMs !== null) {
+                $responseTimeCount++;
+                $totalResponseTimeMs += $entry->responseTimeMs;
+                $rt = $entry->responseTimeMs;
+
+                if ($rt < 100) {
+                    $under100ms++;
+                } elseif ($rt <= 300) {
+                    $between100and300ms++;
+                } elseif ($rt <= 500) {
+                    $between300and500ms++;
+                } elseif ($rt <= 1000) {
+                    $between500and1000ms++;
+                } else {
+                    $over1000ms++;
+                }
+
+                $slowEntries[] = $entry;
+            }
+
+            // Endpoint stats aggregation
+            if (! isset($endpointStats[$entry->endpoint])) {
+                $endpointStats[$entry->endpoint] = [
+                    'endpoint' => $entry->endpoint,
+                    'requests' => 0,
+                    'totalResponseMs' => 0.0,
+                    'maxResponseMs' => 0.0,
+                    'hasRt' => false,
+                ];
+            }
+            $endpointStats[$entry->endpoint]['requests']++;
+            if ($entry->responseTimeMs !== null) {
+                $endpointStats[$entry->endpoint]['hasRt'] = true;
+                $endpointStats[$entry->endpoint]['totalResponseMs'] += $entry->responseTimeMs;
+                if ($entry->responseTimeMs > $endpointStats[$entry->endpoint]['maxResponseMs']) {
+                    $endpointStats[$entry->endpoint]['maxResponseMs'] = $entry->responseTimeMs;
+                }
+            }
+
+            // Client IP stats aggregation
+            if (! isset($clientStats[$entry->ip])) {
+                $clientStats[$entry->ip] = [
+                    'ip' => $entry->ip,
+                    'requests' => 0,
+                    'totalBytes' => 0,
+                ];
+            }
+            $clientStats[$entry->ip]['requests']++;
+            $clientStats[$entry->ip]['totalBytes'] += $entry->bytes;
+
+            // Error stats aggregation
+            if ($entry->statusCode >= 400) {
+                if (! isset($errorStats[$entry->endpoint])) {
+                    $errorStats[$entry->endpoint] = [
+                        'endpoint' => $entry->endpoint,
+                        'status404' => 0,
+                        'status500' => 0,
+                        'status503' => 0,
+                        'totalErrors' => 0,
+                    ];
+                }
+                $errorStats[$entry->endpoint]['totalErrors']++;
+                if ($entry->statusCode === 404) {
+                    $errorStats[$entry->endpoint]['status404']++;
+                } elseif ($entry->statusCode === 500) {
+                    $errorStats[$entry->endpoint]['status500']++;
+                } elseif ($entry->statusCode === 503) {
+                    $errorStats[$entry->endpoint]['status503']++;
+                }
+            }
+        }
+
+        // Rates
+        $timeWindowMinutes = 1.0;
+        if ($firstTime !== null && $lastTime !== null && $lastTime > $firstTime) {
+            $timeWindowMinutes = max(1.0, ($lastTime - $firstTime) / 60.0);
+        }
+        $requestsPerMinute = round($totalRequests / $timeWindowMinutes, 2);
+        $requestsPerHour = round($requestsPerMinute * 60, 2);
+
+        $hasResponseTime = $responseTimeCount > 0;
+        $averageResponseTimeMs = $hasResponseTime ? round($totalResponseTimeMs / $responseTimeCount, 2) : null;
+
+        // Sort Top Endpoints
+        usort($endpointStats, fn ($a, $b) => $b['requests'] <=> $a['requests']);
+        $topEndpoints = array_map(function ($item) {
+            return [
+                'endpoint' => $item['endpoint'],
+                'requests' => $item['requests'],
+                'avgResponseMs' => $item['hasRt'] && $item['requests'] > 0 ? round($item['totalResponseMs'] / $item['requests'], 2) : null,
+                'maxResponseMs' => $item['hasRt'] ? round($item['maxResponseMs'], 2) : null,
+            ];
+        }, array_slice($endpointStats, 0, 10));
+
+        // Sort Slow Endpoints
+        usort($slowEntries, fn ($a, $b) => ($b->responseTimeMs ?? 0) <=> ($a->responseTimeMs ?? 0));
+        $slowEndpoints = array_map(function (ApacheLogEntryData $e) {
+            return [
+                'endpoint' => $e->endpoint,
+                'method' => $e->method,
+                'responseTimeMs' => $e->responseTimeMs,
+                'statusCode' => $e->statusCode,
+                'ip' => $e->ip,
+                'timestamp' => $e->timestamp,
+            ];
+        }, array_slice($slowEntries, 0, 10));
+
+        // Sort Top Client IPs
+        usort($clientStats, fn ($a, $b) => $b['requests'] <=> $a['requests']);
+        $topClientIps = array_slice($clientStats, 0, 10);
+
+        // Sort Error Endpoints
+        usort($errorStats, fn ($a, $b) => $b['totalErrors'] <=> $a['totalErrors']);
+        $errorEndpoints = array_slice($errorStats, 0, 10);
+
+        // Request Timeline (sort chronological)
+        ksort($timelineMinutes);
+        $requestTimeline = [
+            'labels' => array_keys($timelineMinutes),
+            'data' => array_values($timelineMinutes),
+        ];
+
+        return new ApacheMetricsData(
+            totalRequests: $totalRequests,
+            requestsPerMinute: $requestsPerMinute,
+            requestsPerHour: $requestsPerHour,
+            totalTrafficBytes: $totalTrafficBytes,
+            averageResponseTimeMs: $averageResponseTimeMs,
+            http2xx: $http2xx,
+            http3xx: $http3xx,
+            http4xx: $http4xx,
+            http5xx: $http5xx,
+            hasResponseTime: $hasResponseTime,
+            logFound: true,
+            logPath: null,
+            topEndpoints: $topEndpoints,
+            slowEndpoints: $slowEndpoints,
+            topClientIps: $topClientIps,
+            errorEndpoints: $errorEndpoints,
+            responseTimeDistribution: [
+                'under100ms' => $under100ms,
+                'between100and300ms' => $between100and300ms,
+                'between300and500ms' => $between300and500ms,
+                'between500and1000ms' => $between500and1000ms,
+                'over1000ms' => $over1000ms,
+            ],
+            requestTimeline: $requestTimeline,
+            entries: $entries,
+        );
+    }
+}
