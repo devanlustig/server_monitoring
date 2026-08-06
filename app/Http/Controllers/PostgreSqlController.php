@@ -44,9 +44,6 @@ class PostgreSqlController extends Controller
                 $results->get('connections')
             )
         );
-        logger()->info('Controller Collect Data', [
-            'ms' => round((microtime(true) - $t) * 1000, 2),
-        ]);
 
         /*
         | Filter
@@ -67,10 +64,6 @@ class PostgreSqlController extends Controller
                 strtolower($state)
             );
         }
-
-        logger()->info('Controller Filter', [
-            'ms' => round((microtime(true) - $t) * 1000, 2),
-        ]);
 
         /*
         | Sort
@@ -99,9 +92,6 @@ class PostgreSqlController extends Controller
         });
 
         $connections = collect($sortedConnections);
-        logger()->info('Controller Sort', [
-            'ms' => round((microtime(true) - $t) * 1000, 2),
-        ]);
 
         /*
         | Analytics
@@ -134,10 +124,6 @@ class PostgreSqlController extends Controller
             ->sortByDesc(fn ($c) => $c->activityDurationInSeconds())
             ->first();
 
-        logger()->info('Controller Analytics', [
-            'ms' => round((microtime(true) - $t) * 1000, 2),
-        ]);
-
         /*
         | Filter Dropdown
         */
@@ -164,10 +150,6 @@ class PostgreSqlController extends Controller
             ->sort()
             ->values();
 
-        logger()->info('Controller Dropdown', [
-            'ms' => round((microtime(true) - $t) * 1000, 2),
-        ]);
-
         /*
         | View
         */
@@ -186,14 +168,6 @@ class PostgreSqlController extends Controller
             'applications' => $applications,
             'databases' => $databases,
 
-        ]);
-
-        logger()->info('Controller Create View', [
-            'ms' => round((microtime(true) - $t) * 1000, 2),
-        ]);
-
-        logger()->info('Controller TOTAL', [
-            'ms' => round((microtime(true) - $controllerStart) * 1000, 2),
         ]);
 
         return $view;
@@ -272,12 +246,6 @@ class PostgreSqlController extends Controller
     public function killSelected(Request $request,MonitoredServer $server,PostgreSqlService $postgres,)
     {
 
-        logger()->info('HTTP REQUEST KILL MULTIPLE',
-            [
-                'server' => $server->name,
-                'pids' => $request->input('pids', []),
-            ]
-        );
 
         $pids = $request->input(
         'pids',

@@ -37,7 +37,7 @@
         word-break: break-all;
     }
     .page-header {
-        background: linear-gradient(135deg, #0d6efd, #0b5ed7);
+        background: linear-gradient(135deg, #0d6efd, #8e1592);
         color: white;
         padding: 2rem 1.5rem;
         border-radius: 12px;

@@ -52,10 +52,6 @@ class PostgreSqlService
         SELECT pg_terminate_backend({$pid});
         SQL;
 
-        logger()->info('Terminate SQL', [
-            'pid' => $pid,
-            'sql' => $sql,
-        ]);
 
         $result = trim(
             $this->runSql(
@@ -63,10 +59,6 @@ class PostgreSqlService
                 $sql
             )
         );
-
-        logger()->info('Terminate Result', [
-            'result' => $result,
-        ]);
 
         if ($result !== 't') {
             throw new RuntimeException(
@@ -184,18 +176,11 @@ SQL;
             array_map('intval', $pids)
         );
 
-        logger()->info('TerminateMany START', [
-            'pids' => $pids,
-        ]);
 
         foreach ($pids as $pid) {
             try {
                 if ($this->terminate($server, (int) $pid)) {
                     $count++;
-                    logger()->info('Terminate Success', [
-                        'pid' => $pid,
-                        'count' => $count,
-                    ]);
                 }
 
             } catch (\Throwable $e) {
@@ -209,10 +194,6 @@ SQL;
                 );
             }
         }
-
-        logger()->info('TerminateMany FINISH', [
-            'count' => $count,
-        ]);
 
         return $count;
     }
@@ -254,14 +235,6 @@ SQL;
             $server,
             $command
         );
-
-        logger()->info('RUN SQL');
-        logger()->info([
-            'sql' => $sql,
-        ]);
-        logger()->info([
-            'output' => $result->output,
-        ]);
 
         if (! $result->successful) {
             throw new RuntimeException(
@@ -371,12 +344,6 @@ SQL;
 
     public function restart(MonitoredServer $server,): bool {
 
-        logger()->info(
-            'Restart PostgreSQL Service',
-            [
-                'server' => $server->name,
-            ]
-        );
 
         $result = $this->commands->execute(
             $server,
@@ -404,12 +371,6 @@ SQL;
                 'PostgreSQL service is not active.'
             );
         }
-        logger()->info(
-            'Restart PostgreSQL Success',
-            [
-                'status' => trim($status->output),
-            ]
-        );
         return true;
     }
 

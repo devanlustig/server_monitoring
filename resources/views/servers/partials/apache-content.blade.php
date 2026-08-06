@@ -80,7 +80,7 @@
                 </div>
                 <h3 class="fw-bold mb-0 text-dark">{{ number_format($metrics->slowRequestCount) }}</h3>
                 <div class="text-muted small mt-2">
-                    <i class="bi bi-info-circle me-1"></i> {{ number_format($metrics->responseTimeDistribution['over1000ms']) }} requests &gt; 1 sec
+                    <i class="bi bi-info-circle me-1"></i> {{ number_format($metrics->responseTimeDistribution['over1000ms']) }} requests &gt; 3 sec
                 </div>
             </div>
         </div>
@@ -263,6 +263,90 @@
     </div>
 </div>
 @endif
+
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    Historical Analytics
+                </h5>
+
+                <select
+                    id="historyPeriod"
+                    class="form-select form-select-sm"
+                    style="width:170px">
+                    <option value="1h">
+                        Last 1 Hour
+                    </option>
+                    <option value="6h">
+                        Last 6 Hours
+                    </option>
+                    <option value="24h" selected>
+                        Last 24 Hours
+                    </option>
+                    <option value="7d">
+                        Last 7 Days
+                    </option>
+                    <option value="30d">
+                        Last 30 Days
+                    </option>
+                </select>
+            </div>
+
+            <div class="card-body">
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="border rounded p-3">
+                            <div class="text-muted small">
+                                Current
+                            </div>
+                            <h4 id="summaryCurrent">
+                                {{ number_format($history['summary']->current,1) }}ms
+                            </h4>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="border rounded p-3">
+                            <div class="text-muted small">
+                                Average
+                            </div>
+                            <h4 id="summaryAverage">
+                                {{ number_format($history['summary']->average,1) }} ms
+                            </h4>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="border rounded p-3">
+                            <div class="text-muted small">
+                                Peak
+                            </div>
+                            <h4 id="summaryMaximum">
+                                {{ number_format($history['summary']->maximum,1) }} ms
+                            </h4>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="border rounded p-3">
+                            <div class="text-muted small">
+                                Minimum
+                            </div>
+                            <h4 id="summaryMinimum">
+                                {{ number_format($history['summary']->minimum,1) }} ms
+                            </h4>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="height:320px">
+                    <canvas id="historyResponseChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Charts Row: Timeline & HTTP Status Pie Chart -->
 <div class="row g-4 mb-4">

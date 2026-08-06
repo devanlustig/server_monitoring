@@ -30,65 +30,40 @@ class PerformanceMonitor
         Closure $next
     ): Response {
 
+        if ($this->shouldSkip($request)) {
+            return $next($request);
+        }
+
         $start = microtime(true);
-
         $response = $next($request);
-
         $duration = round(
             (microtime(true) - $start) * 1000,
             2
         );
 
-        logger()->info('Performance Path', [
-            'path' => $request->path(),
-            'skip' => $this->shouldSkip($request),
+        $route = $request->route();
+        ApplicationRequestLog::create([
+            'method' => $request->method(),
+            'url' => $request->path(),
+            'route_name' => optional($route)->getName(),
+            'controller' => optional($route)
+                ?->getActionName(),
+            'status_code' => $response->getStatusCode(),
+            'response_time_ms' => $duration,
+            'memory_usage_mb' => round(
+                memory_get_usage(true) / 1024 / 1024,
+                2
+            ),
+            'peak_memory_mb' => round(
+                memory_get_peak_usage(true) / 1024 / 1024,
+                2
+            ),
+            'ip_address' => $request->ip(),
+            'user_id' => auth()->id(),
+            'is_slow' => $duration >= 500,
+            'created_at' => now(),
         ]);
-
-        if (!$this->shouldSkip($request)) {
-
-            $route = $request->route();
-
-            logger()->info('Performance Monitor', [
-                'url' => $request->path(),
-                'response_time_ms' => $duration,
-            ]);
-
-            ApplicationRequestLog::create([
-
-                'method' => $request->method(),
-
-                'url' => $request->path(),
-
-                'route_name' => optional($route)->getName(),
-
-                'controller' => optional($route)
-                    ?->getActionName(),
-
-                'status_code' => $response->getStatusCode(),
-
-                'response_time_ms' => $duration,
-
-                'memory_usage_mb' => round(
-                    memory_get_usage(true) / 1024 / 1024,
-                    2
-                ),
-
-                'peak_memory_mb' => round(
-                    memory_get_peak_usage(true) / 1024 / 1024,
-                    2
-                ),
-
-                'ip_address' => $request->ip(),
-
-                'user_id' => auth()->id(),
-
-                'is_slow' => $duration >= 500,
-
-                'created_at' => now(),
-
-            ]);
-        }
-
+        
         return $response;
     }
 

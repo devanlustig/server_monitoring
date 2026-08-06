@@ -68,10 +68,6 @@ class SshPasswordConnection implements ServerConnection
 
         }
 
-        logger()->info('Batch Script', [
-            'script' => $script,
-        ]);
-
         $output = $ssh->exec($script);
 
         return new BatchCommandResult(

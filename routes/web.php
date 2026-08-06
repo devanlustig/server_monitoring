@@ -28,11 +28,4 @@ Route::post('/servers/{server}/postgresql/capture', [PostgreSqlIncidentControlle
 Route::post('/servers/{server}/postgresql/restart', [PostgreSqlController::class, 'restart'])->name('servers.postgresql.restart');
 Route::get('/servers/{server}/status', [MonitoredServerController::class, 'status'])->name('servers.status');
 
-Route::get('/test-ssh-many', function (\App\Services\Monitoring\RemoteCommandService $remote) {
-    $server = \App\Models\MonitoredServer::find(1);
-    return $remote->executeMany($server, [
-        'date' => 'date',
-        'whoami' => 'whoami',
-        'hostname' => 'hostname',
-    ]);
-});
+Route::get('/servers/{server}/apache/history',[ApacheController::class, 'history'])->name('servers.apache.history');

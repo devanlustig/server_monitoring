@@ -8,7 +8,7 @@
 
 <style>
     .page-header {
-        background: linear-gradient(135deg, #0d6efd, #0b5ed7);
+        background: linear-gradient(135deg, #0d6efd, #8e1592);
         color: white;
         padding: 2rem 1.5rem;
         border-radius: 12px;
@@ -77,6 +77,7 @@
 <script>
 let apacheTimelineChartInstance = null;
 let httpStatusPieChartInstance = null;
+let historyChart = null;
 
 function renderApacheTimelineChart(labels, data) {
     const ctx = document.getElementById('apacheTimelineChart');
@@ -128,6 +129,39 @@ function renderApacheTimelineChart(labels, data) {
     });
 }
 
+
+function renderHistoryChart(labels, values){
+    const canvas = document.getElementById('historyResponseChart');
+    if(!canvas) return;
+    if(historyChart){
+        historyChart.destroy();
+    }
+    historyChart = new Chart(canvas,{
+        type:'line',
+        data:{
+            labels:labels,
+            datasets:[{
+                label:'Average Response Time',
+                data:values,
+                borderColor:'#198754',
+                backgroundColor:'rgba(25,135,84,.15)',
+                fill:true,
+                tension:.35
+            }]
+        },
+
+        options:{
+            responsive:true,
+            maintainAspectRatio:false,
+            plugins:{
+                legend:{
+                    display:false
+                }
+            }
+        }
+    });
+}
+
 function renderHttpStatusPieChart(http2xx, http3xx, http4xx, http5xx) {
     const ctx = document.getElementById('httpStatusPieChart');
     if (!ctx) return;
@@ -161,9 +195,14 @@ function renderHttpStatusPieChart(http2xx, http3xx, http4xx, http5xx) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+    const historyUrl ="{{ route('servers.apache.history',$server) }}";
     const initialLabels = @json($metrics->requestTimeline['labels'] ?? []);
     const initialData = @json($metrics->requestTimeline['data'] ?? []);
     renderApacheTimelineChart(initialLabels, initialData);
+    renderHistoryChart(
+        @json($history['chart']->labels),
+        @json($history['chart']->values)
+    );
 
     renderHttpStatusPieChart(
         {{ $metrics->http2xx }},
@@ -175,6 +214,43 @@ document.addEventListener('DOMContentLoaded', function () {
     const refreshUrl = "{{ route('servers.apache.refresh', $server) }}";
     let lastSuccessTimestamp = Date.now();
     let isErrorState = false;
+
+    document
+    .getElementById('historyPeriod')
+    .addEventListener('change', function () {
+
+        console.log(this.value);
+
+        loadHistory(this.value);
+
+    });
+
+    async function loadHistory(period){
+
+        const response = await fetch(
+            historyUrl + '?period=' + period,
+            {
+                headers:{
+                    'Accept':'application/json'
+                }
+            }
+        );
+
+        const json = await response.json();
+        document.getElementById('summaryCurrent').innerHTML =
+            json.summary.current.toFixed(1) + ' ms';
+        document.getElementById('summaryAverage').innerHTML =
+            json.summary.average.toFixed(1) + ' ms';
+        document.getElementById('summaryMaximum').innerHTML =
+            json.summary.maximum.toFixed(1) + ' ms';
+        document.getElementById('summaryMinimum').innerHTML =
+            json.summary.minimum.toFixed(1) + ' ms';
+        renderHistoryChart(
+            json.chart.labels,
+            json.chart.values
+        );
+
+    }
 
     function updateTimeAgo() {
         if (isErrorState) return;

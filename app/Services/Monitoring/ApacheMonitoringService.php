@@ -7,6 +7,12 @@ use App\Services\Monitoring\DTO\ApacheMetricsData;
 
 class ApacheMonitoringService
 {
+
+    private const RESPONSE_EXCELLENT_MS = 100;
+    private const RESPONSE_GOOD_MS = 300;
+    private const RESPONSE_ACCEPTABLE_MS = 1000;
+    private const RESPONSE_SLOW_MS = 3000;
+
     public function analyze(array $parsedResult): ApacheMetricsData
     {
         $logFound = $parsedResult['logFound'] ?? false;
@@ -101,19 +107,18 @@ class ApacheMonitoringService
                 $totalResponseTimeMs += $entry->responseTimeMs;
                 $rt = $entry->responseTimeMs;
 
-                if ($rt < 100) {
+                if ($rt < self::RESPONSE_EXCELLENT_MS) {
                     $under100ms++;
-                } elseif ($rt <= 300) {
+                } elseif ($rt <= self::RESPONSE_GOOD_MS) {
                     $between100and300ms++;
-                } elseif ($rt <= 500) {
+                } elseif ($rt <= self::RESPONSE_ACCEPTABLE_MS) {
                     $between300and500ms++;
-                } elseif ($rt <= 1000) {
+                } elseif ($rt <= self::RESPONSE_SLOW_MS) {
                     $between500and1000ms++;
                 } else {
                     $over1000ms++;
+                    $slowEntries[] = $entry;
                 }
-
-                $slowEntries[] = $entry;
             }
 
             // Endpoint stats aggregation
@@ -225,7 +230,7 @@ class ApacheMonitoringService
         $successRate = $totalRequests > 0 ? round(($totalSuccesses / $totalRequests) * 100, 2) : 100.0;
 
         // 2. Slow Request Count (>500ms)
-        $slowRequestCount = $between500and1000ms + $over1000ms;
+        $slowRequestCount = count($slowEntries);
 
         // 3. Peak Request Minute & Average Request Minute
         $peakMinuteKey = '-';
@@ -245,13 +250,14 @@ class ApacheMonitoringService
         if ($totalRequests > 0) {
             $p5xx = ($http5xx / $totalRequests) * 100;
             $p4xx = ($http4xx / $totalRequests) * 100;
-            $pSlow = ($over1000ms / $totalRequests) * 100;
+            //$pSlow = ($over1000ms / $totalRequests) * 100;
+            $pSlow = ($slowRequestCount / $totalRequests) * 100;
 
             $healthScore -= ($p5xx * 5.0); // Penalty for 5xx errors
             $healthScore -= ($p4xx * 1.5); // Penalty for 4xx errors
             $healthScore -= ($pSlow * 2.0); // Penalty for very slow requests (>1s)
 
-            if ($averageResponseTimeMs !== null && $averageResponseTimeMs > 500) {
+            if ($averageResponseTimeMs !== null && $averageResponseTimeMs > self::RESPONSE_SLOW_MS) {
                 $healthScore -= 10.0;
             }
         }
@@ -275,15 +281,15 @@ class ApacheMonitoringService
                 'message' => "Error rate mencapai <strong>{$errorRate}%</strong>. Tinjau tabel <em>Error Endpoints</em> untuk mendeteksi link rusak atau 404.",
             ];
         }
-        if ($over1000ms > 0) {
+        if ($slowRequestCount > 0) {
             $recommendations[] = [
                 'type' => 'warning',
                 'icon' => 'bi-hourglass-bottom',
-                'title' => 'Request Lambat (> 1 Detik)',
-                'message' => "Terdapat <strong>{$over1000ms}</strong> request dengan response time lebih dari 1 detik. Pertimbangkan optimasi query database atau caching.",
+                'title' => 'Request Lambat (> 3 Detik)',
+                'message' => "Terdapat <strong>{$slowRequestCount}</strong> request dengan response time lebih dari 1 detik. Pertimbangkan optimasi query database atau caching.",
             ];
         }
-        if ($hasResponseTime && $averageResponseTimeMs > 500) {
+        if ($hasResponseTime && $averageResponseTimeMs > self::RESPONSE_SLOW_MS) {
             $recommendations[] = [
                 'type' => 'info',
                 'icon' => 'bi-speedometer2',

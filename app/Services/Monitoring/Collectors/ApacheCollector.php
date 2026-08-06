@@ -19,16 +19,8 @@ class ApacheCollector
     public function collect(MonitoredServer $server, int $lines = 5000): array
     {
         $command = $this->command($server, $lines);
-        logger()->info('Apache Command', [
-            'command' => $command,
-        ]);
-
         $result = $this->commands->execute($server, $command);
 
-        logger()->info('Apache Result', [
-            'success' => $result->successful,
-            'output' => $result->output,
-        ]);
 
         if (! $result->successful) {
             throw new RuntimeException(
