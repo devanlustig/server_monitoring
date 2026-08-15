@@ -15,7 +15,7 @@ class MonitoredServer extends Model
         'ip_address', 'environment', 'timezone', 'description', 'is_active', 'tags', 'metadata',
         'system_hostname', 'operating_system', 'kernel_version', 'cpu_model', 'cpu_core_count',
         'total_ram_bytes', 'total_disk_bytes', 'last_successful_connection_at', 'is_online',
-        'last_checked_at','last_error','postgres_port',
+        'last_checked_at','last_error','postgres_port','uptime','load_average','web_server',
     ];
 
     protected function casts(): array

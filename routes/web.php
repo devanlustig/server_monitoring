@@ -6,6 +6,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MonitoredServerController;
 use App\Http\Controllers\PostgreSqlController;
 use App\Http\Controllers\PostgreSqlIncidentController;
+use App\Http\Controllers\NginxController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', DashboardController::class)->name('dashboard');
@@ -16,6 +17,7 @@ Route::resource('servers', MonitoredServerController::class);
 
 // Apache Routes
 Route::get('/servers/{server}/apache', [ApacheController::class, 'show'])->name('servers.apache');
+Route::get('/servers/{server}/nginx',[NginxController::class, 'show'])->name('servers.nginx');
 Route::get('/servers/{server}/apache/refresh', [ApacheController::class, 'refresh'])->name('servers.apache.refresh');
 
 // PostgreSQL Routes

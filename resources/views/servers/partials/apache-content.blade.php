@@ -73,7 +73,7 @@
         <div class="card stat-card shadow-sm h-100 bg-white">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <div class="text-muted fw-bold text-uppercase small tracking-wide">Slow Requests (&gt;500ms)</div>
+                    <div class="text-muted fw-bold text-uppercase small tracking-wide">Slow Requests (&gt;3000ms)</div>
                     <div class="stat-icon bg-warning bg-opacity-10 text-warning">
                         <i class="bi bi-hourglass-split"></i>
                     </div>
@@ -267,32 +267,223 @@
 <div class="row g-4 mb-4">
     <div class="col-12">
         <div class="card shadow-sm border-0">
-            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
                     Historical Analytics
                 </h5>
-
-                <select
-                    id="historyPeriod"
-                    class="form-select form-select-sm"
-                    style="width:170px">
-                    <option value="1h">
-                        Last 1 Hour
-                    </option>
-                    <option value="6h">
-                        Last 6 Hours
-                    </option>
-                    <option value="24h" selected>
-                        Last 24 Hours
-                    </option>
-                    <option value="7d">
-                        Last 7 Days
-                    </option>
-                    <option value="30d">
-                        Last 30 Days
-                    </option>
-                </select>
+                <div class="d-flex gap-2">
+                    <select
+                        id="historyMetric"
+                        class="form-select form-select-sm">
+                        @foreach(
+                            \App\Services\Monitoring\Support\MetricNames::apacheSelectable()
+                            as $key => $label
+                        )
+                            <option value="{{ $key }}">
+                                {{ $label }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <select
+                        id="historyPeriod"
+                        class="form-select form-select-sm">
+                        <option value="1h">Last 1 Hour</option>
+                        <option value="6h">Last 6 Hours</option>
+                        <option value="24h" selected>Last 24 Hours</option>
+                        <option value="7d">Last 7 Days</option>
+                        <option value="30d">Last 30 Days</option>
+                    </select>
+                </div>
             </div>
+
+            <div class="card shadow-sm border-0 mt-4">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-graph-up-arrow text-primary me-2"></i>Endpoint Analytics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-lg-4">
+                            <div class="card border h-100">
+                                <div class="card-header bg-danger-subtle fw-semibold">
+                                    🐢 Top Slow Endpoint
+                                </div>
+                                <div class="card-body p-0">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                        <tr>
+                                            <th>Endpoint</th>
+                                            <th class="text-end">Avg</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+
+                                        @foreach($analytics['topSlow'] as $item)
+
+                                            <tr>
+                                                <td class="small">{{ $item['endpoint'] }}</td>
+                                                <td class="text-end">{{ number_format($item['avgResponseMs']??0,2) }} ms</td>
+                                            </tr>
+
+                                        @endforeach
+
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-lg-4">
+                            <div class="card border h-100">
+                                <div class="card-header bg-primary-subtle fw-semibold">
+                                    🚀 Top Traffic Endpoint
+                                </div>
+                                <div class="card-body p-0">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                        <tr>
+                                            <th>Endpoint</th>
+                                            <th class="text-end">Traffic</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+
+                                        @foreach($analytics['topTraffic'] as $item)
+
+                                            <tr>
+                                                <td class="small">{{ $item['endpoint'] }}</td>
+                                                <td class="text-end">{{ number_format($item['bytes']/1024/1024,2) }} MB</td>
+                                            </tr>
+                                        @endforeach
+
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-lg-4">
+                            <div class="card border h-100">
+                                <div class="card-header bg-warning-subtle fw-semibold">
+                                    ⚠️ Top Error Endpoint
+                                </div>
+                                <div class="card-body p-0">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                        <tr>
+                                            <th>Endpoint</th>
+                                            <th class="text-end">5xx</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+
+                                        @foreach($analytics['topErrors'] as $item)
+
+                                            <tr>
+                                                <td class="small">{{ $item['endpoint'] }}</td>
+                                                <td class="text-end">{{ $item['5xx'] }}</td>
+                                            </tr>
+
+                                        @endforeach
+
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0 mt-4">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-0">
+                        <i class="bi bi-diagram-3 me-2 text-primary"></i>
+                        Endpoint Performance
+                    </h5>
+                    <small class="text-muted">
+                        Endpoint analytics based on Apache access log
+                    </small>
+                </div>
+
+                <span class="badge bg-primary">
+                    {{ count($metrics->endpointAnalytics) }} Endpoints
+                </span>
+            </div>
+
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                        <tr>
+                            <th>Endpoint</th>
+                            <th class="text-center">Requests</th>
+                            <th class="text-center">Average</th>
+                            <th class="text-center">Maximum</th>
+                            <th class="text-center">Traffic</th>
+                            <th class="text-center">5xx</th>
+                            <th class="text-center">Health</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+
+                        @foreach($analytics['topRequests'] as $endpoint)
+                            @php
+                                $avg=$endpoint['avgResponseMs']??0;
+                                $error=$endpoint['5xx']??0;
+                                if($error>0){
+                                    $badge='danger';
+                                    $text='Critical';
+                                }elseif($avg>=3000){
+                                    $badge='warning';
+                                    $text='Warning';
+                                }else{
+                                    $badge='success';
+                                    $text='Healthy';
+                                }
+                            @endphp
+
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold">
+                                        {{ $endpoint['endpoint'] }}
+                                    </div>
+                                </td>
+                                <td class="text-center">
+                                    {{ number_format($endpoint['requests']) }}
+                                </td>
+                                <td class="text-center">
+                                    {{ number_format($endpoint['avgResponseMs']??0,2) }} ms
+                                </td>
+                                <td class="text-center">
+                                    {{ number_format($endpoint['maxResponseMs']??0,2) }} ms
+                                </td>
+                                <td class="text-center">
+                                    {{ number_format(($endpoint['bytes']??0)/1024/1024,2) }} MB
+                                </td>
+                                <td class="text-center">
+                                    @if(($endpoint['5xx']??0)>0)
+                                        <span class="badge bg-danger">
+                                            {{ $endpoint['5xx'] }}
+                                        </span>
+                                    @else
+                                        <span class="badge bg-success">
+                                            0
+                                        </span>
+                                    @endif
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-{{ $badge }}">
+                                        {{ $text }}
+                                    </span>
+                                </td>
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
             <div class="card-body">
                 <div class="row mb-4">

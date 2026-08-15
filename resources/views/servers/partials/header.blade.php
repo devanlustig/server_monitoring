@@ -23,9 +23,11 @@
         </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a href="{{ route('servers.apache', $server) }}" class="btn btn-primary shadow-sm fw-semibold d-flex align-items-center gap-1">
+        <!-- <a href="{{ route('servers.apache', $server) }}" class="btn btn-primary shadow-sm fw-semibold d-flex align-items-center gap-1">
             <i class="bi bi-server"></i> Apache
-        </a>
+        </a> -->
+        <a href="{{ $server->web_server === 'nginx' ? route('servers.nginx', $server) : route('servers.apache', $server) }}" class="btn btn-primary shadow-sm fw-semibold d-flex align-items-center gap-1"><i class="bi bi-server"></i> {{ ucfirst($server->web_server ?? 'Apache') }}</a>
+
         <a href="{{ route('servers.postgresql', $server) }}" class="btn btn-success shadow-sm fw-semibold d-flex align-items-center gap-1">
             <i class="bi bi-database-fill-gear"></i> PostgreSQL
         </a>
@@ -66,9 +68,12 @@
                 <h4 class="fw-bold mb-1 {{ $server->is_online ? 'text-success' : 'text-danger' }}">
                     {{ $server->is_online ? 'ONLINE' : 'OFFLINE' }}
                 </h4>
-                <div class="text-muted small">
-                    Last SSH: {{ $server->last_successful_connection_at?->format('d M Y H:i:s') ?? '-' }}
-                </div>
+                    <div class="text-muted small">
+                        <div>Last SSH : {{ $server->last_successful_connection_at?->format('d M Y H:i:s') ?? '-' }}</div>
+                        <div>Uptime : {{ str_replace('up ','',$server->uptime ?? '-') }}</div>
+                        <div>Load Avg : {{ $server->load_average ?? '-' }}</div>
+                    </div>
+            
             </div>
         </div>
     </div>

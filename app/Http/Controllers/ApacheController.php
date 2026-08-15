@@ -7,6 +7,7 @@ use App\Services\Monitoring\ApacheMonitoringService;
 use App\Services\Monitoring\Collectors\ApacheCollector;
 use App\Services\Monitoring\History\MetricHistoryQueryService;
 use App\Services\Monitoring\Support\MetricNames;
+use App\Services\Monitoring\Analytics\EndpointAnalyticsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\View\View;
 use Illuminate\Http\Request;
@@ -17,7 +18,8 @@ class ApacheController extends Controller
         private readonly ApacheCollector $collector,
         private readonly ApacheMonitoringService $service,
         private readonly MetricHistoryQueryService $history,
-    ) {}
+        private readonly EndpointAnalyticsService $analytics,
+    ){}
 
     public function show(MonitoredServer $server): View
     {
@@ -33,12 +35,15 @@ class ApacheController extends Controller
             $metrics = $this->service->analyze($parsed);
         }
 
-        $history = $this->loadHistory($server);
+        $metric = request()->get('metric',MetricNames::AVERAGE_RESPONSE_TIME);
+        $history = $this->loadHistory($server,$metric);
+        $analytics=$this->loadAnalytics($metrics->endpointAnalytics);
 
         return view('servers.apache', [
             'server' => $server,
             'metrics' => $metrics,
             'history' => $history,
+            'analytics'=>$analytics,
         ]);
     }
 
@@ -52,12 +57,13 @@ class ApacheController extends Controller
         } catch (\Throwable $e) {
             throw $e;
         }
-
+        $analytics=$this->loadAnalytics($metrics->endpointAnalytics);
         $html = view('servers.partials.apache-content',
         [
             'server'  => $server,
             'metrics' => $metrics,
             'history' => $history,
+            'analytics' => $analytics
         ]
         )->render();
 
@@ -78,39 +84,56 @@ class ApacheController extends Controller
         ]);
     }
 
-    private function loadHistory(MonitoredServer $server): array
-    {
+    private function loadHistory(MonitoredServer $server,string $metric = MetricNames::AVERAGE_RESPONSE_TIME): array{
+
         return [
             'chart' => $this->history->chartLast24Hours(
                 server: $server,
                 category: 'apache',
-                metricName: MetricNames::AVERAGE_RESPONSE_TIME,
+                metricName: $metric,
             ),
 
             'summary' => $this->history->summaryLast24Hours(
                 server: $server,
                 category: 'apache',
-                metricName: MetricNames::AVERAGE_RESPONSE_TIME,
+                metricName: $metric,
             ),
+        ];
+    }
+
+    private function loadAnalytics(array $endpointAnalytics): array
+    {
+        $collection=collect($endpointAnalytics);
+
+        return[
+            'topRequests'=>$this->analytics->topRequests($collection),
+            'topSlow'=>$this->analytics->topSlow($collection),
+            'topTraffic'=>$this->analytics->topTraffic($collection),
+            'topErrors'=>$this->analytics->topErrors($collection),
         ];
     }
 
     public function history(Request $request,MonitoredServer $server
     ): JsonResponse {
 
+        $metric = $request->get(
+            'metric',
+            MetricNames::AVERAGE_RESPONSE_TIME
+        );
+
         $period = $request->get('period', '24h');
         [$from, $to] = $this->history->resolvePeriod($period);
         $chart = $this->history->chart(
             server: $server,
             category: 'apache',
-            metricName: MetricNames::AVERAGE_RESPONSE_TIME,
+            metricName: $metric,
             from: $from,
             to: $to,
         );
         $summary = $this->history->summary(
             server: $server,
             category: 'apache',
-            metricName: MetricNames::AVERAGE_RESPONSE_TIME,
+            metricName: $metric,
             from: $from,
             to: $to,
         );

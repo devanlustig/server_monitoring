@@ -18,6 +18,7 @@ class ApacheMetricsData
         public readonly bool $logFound,
         public readonly ?string $logPath,
         public readonly array $topEndpoints,
+        public readonly array $endpointAnalytics,
         public readonly array $slowEndpoints,
         public readonly array $topClientIps,
         public readonly array $errorEndpoints,

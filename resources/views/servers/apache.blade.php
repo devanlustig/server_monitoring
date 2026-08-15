@@ -75,261 +75,30 @@
 
 @push('scripts')
 <script>
-let apacheTimelineChartInstance = null;
-let httpStatusPieChartInstance = null;
-let historyChart = null;
+window.apacheConfig={
+    refreshUrl:"{{ route('servers.apache.refresh',$server) }}",
+    historyUrl:"{{ route('servers.apache.history',$server) }}",
 
-function renderApacheTimelineChart(labels, data) {
-    const ctx = document.getElementById('apacheTimelineChart');
-    if (!ctx) return;
+    initialTimeline:{
+        labels:@json($metrics->requestTimeline['labels']??[]),
+        data:@json($metrics->requestTimeline['data']??[])
+    },
 
-    if (apacheTimelineChartInstance) {
-        apacheTimelineChartInstance.destroy();
+    initialHistory:{
+        labels:@json($history['chart']->labels),
+        values:@json($history['chart']->values)
+    },
+
+    httpStatus:{
+        success:{{ $metrics->http2xx }},
+        redirect:{{ $metrics->http3xx }},
+        client:{{ $metrics->http4xx }},
+        server:{{ $metrics->http5xx }}
     }
 
-    apacheTimelineChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels.length ? labels : ['No Data'],
-            datasets: [{
-                label: 'Requests / Min',
-                data: data.length ? data : [0],
-                borderColor: '#0d6efd',
-                backgroundColor: 'rgba(13, 110, 253, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.3,
-                pointRadius: 3,
-                pointBackgroundColor: '#0d6efd'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return 'Requests: ' + context.parsed.y;
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: { color: 'rgba(0, 0, 0, 0.05)' }
-                },
-                x: {
-                    grid: { display: false }
-                }
-            }
-        }
-    });
-}
+};
 
-
-function renderHistoryChart(labels, values){
-    const canvas = document.getElementById('historyResponseChart');
-    if(!canvas) return;
-    if(historyChart){
-        historyChart.destroy();
-    }
-    historyChart = new Chart(canvas,{
-        type:'line',
-        data:{
-            labels:labels,
-            datasets:[{
-                label:'Average Response Time',
-                data:values,
-                borderColor:'#198754',
-                backgroundColor:'rgba(25,135,84,.15)',
-                fill:true,
-                tension:.35
-            }]
-        },
-
-        options:{
-            responsive:true,
-            maintainAspectRatio:false,
-            plugins:{
-                legend:{
-                    display:false
-                }
-            }
-        }
-    });
-}
-
-function renderHttpStatusPieChart(http2xx, http3xx, http4xx, http5xx) {
-    const ctx = document.getElementById('httpStatusPieChart');
-    if (!ctx) return;
-
-    if (httpStatusPieChartInstance) {
-        httpStatusPieChartInstance.destroy();
-    }
-
-    httpStatusPieChartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: ['2xx Success', '3xx Redirection', '4xx Client Error', '5xx Server Error'],
-            datasets: [{
-                data: [http2xx, http3xx, http4xx, http5xx],
-                backgroundColor: ['#198754', '#0dcaf0', '#ffc107', '#dc3545'],
-                borderWidth: 2,
-                borderColor: '#ffffff'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { boxWidth: 12, font: { size: 11 } }
-                }
-            }
-        }
-    });
-}
-
-document.addEventListener('DOMContentLoaded', function () {
-    const historyUrl ="{{ route('servers.apache.history',$server) }}";
-    const initialLabels = @json($metrics->requestTimeline['labels'] ?? []);
-    const initialData = @json($metrics->requestTimeline['data'] ?? []);
-    renderApacheTimelineChart(initialLabels, initialData);
-    renderHistoryChart(
-        @json($history['chart']->labels),
-        @json($history['chart']->values)
-    );
-
-    renderHttpStatusPieChart(
-        {{ $metrics->http2xx }},
-        {{ $metrics->http3xx }},
-        {{ $metrics->http4xx }},
-        {{ $metrics->http5xx }}
-    );
-
-    const refreshUrl = "{{ route('servers.apache.refresh', $server) }}";
-    let lastSuccessTimestamp = Date.now();
-    let isErrorState = false;
-
-    document
-    .getElementById('historyPeriod')
-    .addEventListener('change', function () {
-
-        console.log(this.value);
-
-        loadHistory(this.value);
-
-    });
-
-    async function loadHistory(period){
-
-        const response = await fetch(
-            historyUrl + '?period=' + period,
-            {
-                headers:{
-                    'Accept':'application/json'
-                }
-            }
-        );
-
-        const json = await response.json();
-        document.getElementById('summaryCurrent').innerHTML =
-            json.summary.current.toFixed(1) + ' ms';
-        document.getElementById('summaryAverage').innerHTML =
-            json.summary.average.toFixed(1) + ' ms';
-        document.getElementById('summaryMaximum').innerHTML =
-            json.summary.maximum.toFixed(1) + ' ms';
-        document.getElementById('summaryMinimum').innerHTML =
-            json.summary.minimum.toFixed(1) + ' ms';
-        renderHistoryChart(
-            json.chart.labels,
-            json.chart.values
-        );
-
-    }
-
-    function updateTimeAgo() {
-        if (isErrorState) return;
-        const timeAgoText = document.getElementById('time-ago-text');
-        if (!timeAgoText) return;
-
-        const elapsedSeconds = Math.floor((Date.now() - lastSuccessTimestamp) / 1000);
-        if (elapsedSeconds <= 1) {
-            timeAgoText.textContent = 'Updated just now';
-        } else {
-            timeAgoText.textContent = `Updated ${elapsedSeconds} sec ago`;
-        }
-    }
-
-    setInterval(updateTimeAgo, 1000);
-
-    async function fetchApacheData() {
-        const refreshIcon = document.getElementById('refresh-icon');
-        if (refreshIcon) refreshIcon.classList.add('spin-icon');
-
-        try {
-            const response = await fetch(refreshUrl, {
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Accept': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP status: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            if (data.html && document.getElementById('apache-main-content')) {
-                document.getElementById('apache-main-content').innerHTML = data.html;
-            }
-
-            if (data.metrics) {
-                if (data.metrics.requestTimeline) {
-                    renderApacheTimelineChart(
-                        data.metrics.requestTimeline.labels || [],
-                        data.metrics.requestTimeline.data || []
-                    );
-                }
-
-                renderHttpStatusPieChart(
-                    data.metrics.http2xx || 0,
-                    data.metrics.http3xx || 0,
-                    data.metrics.http4xx || 0,
-                    data.metrics.http5xx || 0
-                );
-            }
-
-            lastSuccessTimestamp = Date.now();
-            isErrorState = false;
-
-            if (refreshIcon) refreshIcon.classList.remove('spin-icon');
-
-            const liveText = document.getElementById('live-text');
-            if (liveText) {
-                liveText.innerHTML = '<span class="text-success-light fw-bold" style="color: #52c41a;">LIVE</span> • <span id="time-ago-text">Updated just now</span>';
-            }
-
-        } catch (error) {
-            console.error('Auto-refresh Apache failed:', error);
-            isErrorState = true;
-
-            if (refreshIcon) refreshIcon.classList.remove('spin-icon');
-
-            const liveText = document.getElementById('live-text');
-            if (liveText) {
-                liveText.innerHTML = '<span class="text-danger fw-bold"><i class="bi bi-exclamation-circle-fill me-1"></i>Update failed</span>';
-            }
-        }
-    }
-
-    // Auto Refresh every 30 seconds
-    setInterval(fetchApacheData, 30000);
-});
 </script>
+
+@vite('resources/js/monitoring/apache.js')
 @endpush

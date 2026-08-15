@@ -29,7 +29,7 @@ class ServerInformationService
         $info = $this->parseOutput($result->output);
 
         return [
-            'system_hostname'               => $this->string($info['HOSTNAME'] ?? null),
+            'system_hostname'              => $this->string($info['HOSTNAME'] ?? null),
             'operating_system'             => $this->string($info['OS'] ?? null),
             'kernel_version'               => $this->string($info['KERNEL'] ?? null),
             'cpu_model'                    => $this->string($info['CPU_MODEL'] ?? null),
@@ -37,46 +37,62 @@ class ServerInformationService
             'total_ram_bytes'              => $this->integer($info['RAM_BYTES'] ?? null),
             'total_disk_bytes'             => $this->integer($info['DISK_BYTES'] ?? null),
 
+            'uptime'                       => $this->string($info['UPTIME']??null),
+            'load_average'                 => $this->string($info['LOADAVG']??null),
+            'web_server'                   => $this->string($info['WEB_SERVER'] ?? null),
+
             // untuk pengembangan berikutnya
             // 'architecture' => $this->string($info['ARCH'] ?? null),
             // 'ip_address'   => $this->string($info['IP'] ?? null),
 
             'last_successful_connection_at' => now(),
+
         ];
     }
 
     private function command(): string
     {
         return <<<'BASH'
-echo "HOSTNAME=$(hostname)"
+        echo "HOSTNAME=$(hostname)"
 
-if [ -r /etc/os-release ]; then
-    . /etc/os-release
-    echo "OS=${PRETTY_NAME}"
-else
-    echo "OS=$(uname -s)"
-fi
+        if [ -r /etc/os-release ]; then
+            . /etc/os-release
+            echo "OS=${PRETTY_NAME}"
+        else
+            echo "OS=$(uname -s)"
+        fi
 
-echo "KERNEL=$(uname -r)"
+        echo "KERNEL=$(uname -r)"
 
-CPU_MODEL=$(lscpu 2>/dev/null | awk -F: '/Model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
+        CPU_MODEL=$(lscpu 2>/dev/null | awk -F: '/Model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
 
-if [ -z "$CPU_MODEL" ]; then
-    CPU_MODEL=$(awk -F: '/model name|Hardware|Processor/ {
-        gsub(/^[ \t]+/, "", $2);
-        print $2;
-        exit
-    }' /proc/cpuinfo)
-fi
+        if [ -z "$CPU_MODEL" ]; then
+            CPU_MODEL=$(awk -F: '/model name|Hardware|Processor/ {
+                gsub(/^[ \t]+/, "", $2);
+                print $2;
+                exit
+            }' /proc/cpuinfo)
+        fi
 
-echo "CPU_MODEL=${CPU_MODEL}"
+        echo "CPU_MODEL=${CPU_MODEL}"
 
-echo "CPU_CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)"
+        echo "CPU_CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)"
 
-echo "RAM_BYTES=$(awk '/MemTotal:/ {print $2*1024}' /proc/meminfo)"
+        echo "RAM_BYTES=$(awk '/MemTotal:/ {print $2*1024}' /proc/meminfo)"
 
-echo "DISK_BYTES=$(df -B1 --output=size / | tail -1 | tr -d ' ')"
-BASH;
+        echo "DISK_BYTES=$(df -B1 --output=size / | tail -1 | tr -d ' ')"
+        echo "UPTIME=$(uptime -p)"
+        echo "LOADAVG=$(cut -d' ' -f1-3 /proc/loadavg)"
+        if command -v nginx >/dev/null 2>&1; then
+            echo "WEB_SERVER=nginx"
+        elif command -v apache2 >/dev/null 2>&1; then
+            echo "WEB_SERVER=apache"
+        elif command -v httpd >/dev/null 2>&1; then
+            echo "WEB_SERVER=apache"
+        else
+            echo "WEB_SERVER=unknown"
+        fi
+        BASH;
     }
 
     /**

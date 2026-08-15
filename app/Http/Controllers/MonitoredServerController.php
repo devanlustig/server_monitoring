@@ -6,6 +6,7 @@ use App\Http\Requests\ServerRequest;
 use App\Models\MonitoredServer;
 use App\Services\Monitoring\Connections\ServerConnectionFactory;
 use App\Services\Monitoring\ServerInformationService;
+use App\Services\Monitoring\ServerStatusService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +17,7 @@ class MonitoredServerController extends Controller
     public function __construct(
         private readonly ServerConnectionFactory $connections,
         private readonly ServerInformationService $serverInformation,
+        private readonly ServerStatusService $serverStatus,
     ) {}
 
     public function index(): View
@@ -102,17 +104,18 @@ class MonitoredServerController extends Controller
 
     private function ensureConnection(MonitoredServer $server): void
     {
-        $result = $this->connections->for($server)->test($server);
-
-        if (! $result->successful) {
+        $result=$this->connections->for($server)->test($server);
+        if(!$result->successful){
+            $this->serverStatus->offline($server,$result->message??'SSH connection failed.');
             throw ValidationException::withMessages([
-                'ssh_username' => $result->message,
+                'ssh_username'=>$result->message,
             ]);
         }
 
         $server->update(
             $this->serverInformation->collect($server)
         );
+        $this->serverStatus->online($server);
     }
 
     private function payload(ServerRequest $request, ?MonitoredServer $existing = null): array
@@ -148,25 +151,32 @@ class MonitoredServerController extends Controller
 
     public function refresh(MonitoredServer $server): JsonResponse
     {
-        $server->refresh();
+        try{
+            $server->update($this->serverInformation->collect($server));
+            $this->serverStatus->online($server);
+            $server->refresh();
+        }catch(\Throwable $e){
+            $this->serverStatus->offline($server,$e->getMessage());
+            throw $e;
+        }
 
-        $latestMetric = $server->cpuMetrics()->latest('collected_at')->first();
-        $latestMemory = $server->memoryMetrics()->latest('collected_at')->first();
-        $latestDisk = $server->diskMetrics()->latest('collected_at')->first();
+        $latestMetric=$server->cpuMetrics()->latest('collected_at')->first();
+        $latestMemory=$server->memoryMetrics()->latest('collected_at')->first();
+        $latestDisk=$server->diskMetrics()->latest('collected_at')->first();
 
-        $cpuHistory = $server->cpuMetrics()->latest('collected_at')->limit(20)->get()->reverse();
-        $chartLabels = $cpuHistory->map(fn ($m) => $m->collected_at->format('H:i:s'))->values();
-        $chartData = $cpuHistory->map(fn ($m) => $m->usage_percent)->values();
+        $cpuHistory=$server->cpuMetrics()->latest('collected_at')->limit(20)->get()->reverse();
+        $chartLabels=$cpuHistory->map(fn($m)=>$m->collected_at->format('H:i:s'))->values();
+        $chartData=$cpuHistory->map(fn($m)=>$m->usage_percent)->values();
 
         return response()->json([
-            'header' => view('servers.partials.header', compact('server', 'latestMetric', 'latestMemory', 'latestDisk'))->render(),
-            'system_information' => view('servers.partials.system-information', compact('server'))->render(),
-            'cpu_detail' => view('servers.partials.cpu-detail', compact('server', 'latestMetric'))->render(),
-            'memory_detail' => view('servers.partials.memory-detail', compact('server', 'latestMemory'))->render(),
-            'disk_detail' => view('servers.partials.disk-detail', compact('server', 'latestDisk'))->render(),
-            'cpu_chart' => view('servers.partials.cpu-chart', compact('server'))->render(),
-            'chart_labels' => $chartLabels,
-            'chart_data' => $chartData,
+            'header'=>view('servers.partials.header',compact('server','latestMetric','latestMemory','latestDisk'))->render(),
+            'system_information'=>view('servers.partials.system-information',compact('server'))->render(),
+            'cpu_detail'=>view('servers.partials.cpu-detail',compact('server','latestMetric'))->render(),
+            'memory_detail'=>view('servers.partials.memory-detail',compact('server','latestMemory'))->render(),
+            'disk_detail'=>view('servers.partials.disk-detail',compact('server','latestDisk'))->render(),
+            'cpu_chart'=>view('servers.partials.cpu-chart',compact('server'))->render(),
+            'chart_labels'=>$chartLabels,
+            'chart_data'=>$chartData,
         ]);
     }
 }

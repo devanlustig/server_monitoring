@@ -4,6 +4,8 @@ namespace App\Services\Monitoring;
 
 use App\Services\Monitoring\DTO\ApacheLogEntryData;
 use App\Services\Monitoring\DTO\ApacheMetricsData;
+use App\Services\Monitoring\Analytics\EndpointAnalyticsService;
+use Illuminate\Support\Collection;
 
 class ApacheMonitoringService
 {
@@ -12,6 +14,10 @@ class ApacheMonitoringService
     private const RESPONSE_GOOD_MS = 300;
     private const RESPONSE_ACCEPTABLE_MS = 1000;
     private const RESPONSE_SLOW_MS = 3000;
+
+    public function __construct(
+        private readonly EndpointAnalyticsService $endpointAnalytics
+    ){}
 
     public function analyze(array $parsedResult): ApacheMetricsData
     {
@@ -34,7 +40,8 @@ class ApacheMonitoringService
                 logFound: $logFound,
                 logPath: null,
                 topEndpoints: [],
-                slowEndpoints: [],
+                endpointAnalytics:[],
+                slowEndpoints:[],
                 topClientIps: [],
                 errorEndpoints: [],
                 responseTimeDistribution: [
@@ -72,6 +79,8 @@ class ApacheMonitoringService
         $errorStats = [];
         $timelineMinutes = [];
         $slowEntries = [];
+        $slowEndpoints=[];
+        $slowRequestThreshold = config('monitoring.thresholds.slow_request_ms',3000);
 
         foreach ($entries as $entry) {
             $totalTrafficBytes += $entry->bytes;
@@ -117,27 +126,68 @@ class ApacheMonitoringService
                     $between500and1000ms++;
                 } else {
                     $over1000ms++;
-                    $slowEntries[] = $entry;
                 }
             }
 
+            if($entry->responseTimeMs!==null&&$entry->responseTimeMs>=$slowRequestThreshold){
+                $slowEndpoints[]=[
+                    'endpoint'=>$entry->endpoint,
+                    'method'=>$entry->method,
+                    'responseTimeMs'=>$entry->responseTimeMs,
+                    'statusCode'=>$entry->statusCode,
+                    'timestamp'=>$entry->timestamp,
+                    'ip'=>$entry->ip,
+                ];
+            }
+
             // Endpoint stats aggregation
-            if (! isset($endpointStats[$entry->endpoint])) {
-                $endpointStats[$entry->endpoint] = [
-                    'endpoint' => $entry->endpoint,
-                    'requests' => 0,
-                    'totalResponseMs' => 0.0,
-                    'maxResponseMs' => 0.0,
-                    'hasRt' => false,
+            if (!isset($endpointStats[$entry->endpoint])) {
+                $endpointStats[$entry->endpoint]=[
+                    'endpoint'=>$entry->endpoint,
+                    'requests'=>0,
+                    'totalResponseMs'=>0,
+                    'maxResponseMs'=>0,
+                    'minResponseMs'=>null,
+                    'bytes'=>0,
+                    '2xx'=>0,
+                    '3xx'=>0,
+                    '4xx'=>0,
+                    '5xx'=>0,
+                    'lastAccess'=>null,
+                    'hasRt'=>false,
                 ];
             }
             $endpointStats[$entry->endpoint]['requests']++;
-            if ($entry->responseTimeMs !== null) {
-                $endpointStats[$entry->endpoint]['hasRt'] = true;
-                $endpointStats[$entry->endpoint]['totalResponseMs'] += $entry->responseTimeMs;
-                if ($entry->responseTimeMs > $endpointStats[$entry->endpoint]['maxResponseMs']) {
-                    $endpointStats[$entry->endpoint]['maxResponseMs'] = $entry->responseTimeMs;
+            $endpointStats[$entry->endpoint]['bytes']+=$entry->bytes;
+            $endpointStats[$entry->endpoint]['lastAccess']=$entry->dateTime;
+
+            if($entry->responseTimeMs!==null){
+                $endpointStats[$entry->endpoint]['hasRt']=true;
+                $endpointStats[$entry->endpoint]['totalResponseMs']+=$entry->responseTimeMs;
+                if($endpointStats[$entry->endpoint]['minResponseMs']===null||$entry->responseTimeMs<$endpointStats[$entry->endpoint]['minResponseMs']){
+                    $endpointStats[$entry->endpoint]['minResponseMs']=$entry->responseTimeMs;
                 }
+                if($entry->responseTimeMs>$endpointStats[$entry->endpoint]['maxResponseMs']){
+                    $endpointStats[$entry->endpoint]['maxResponseMs']=$entry->responseTimeMs;
+                }
+            }
+
+            switch(true){
+                case $entry->statusCode>=500:
+                    $endpointStats[$entry->endpoint]['5xx']++;
+                    break;
+
+                case $entry->statusCode>=400:
+                    $endpointStats[$entry->endpoint]['4xx']++;
+                    break;
+
+                case $entry->statusCode>=300:
+                    $endpointStats[$entry->endpoint]['3xx']++;
+                    break;
+
+                default:
+                    $endpointStats[$entry->endpoint]['2xx']++;
+                    break;
             }
 
             // Client IP stats aggregation
@@ -173,6 +223,9 @@ class ApacheMonitoringService
             }
         }
 
+        usort($slowEndpoints,fn($a,$b)=>$b['responseTimeMs']<=>$a['responseTimeMs']);
+        $slowEndpoints=array_slice($slowEndpoints,0,20);
+
         // Rates
         $timeWindowMinutes = 1.0;
         if ($firstTime !== null && $lastTime !== null && $lastTime > $firstTime) {
@@ -184,29 +237,27 @@ class ApacheMonitoringService
         $hasResponseTime = $responseTimeCount > 0;
         $averageResponseTimeMs = $hasResponseTime ? round($totalResponseTimeMs / $responseTimeCount, 2) : null;
 
-        // Sort Top Endpoints
-        usort($endpointStats, fn ($a, $b) => $b['requests'] <=> $a['requests']);
-        $topEndpoints = array_map(function ($item) {
-            return [
-                'endpoint' => $item['endpoint'],
-                'requests' => $item['requests'],
-                'avgResponseMs' => $item['hasRt'] && $item['requests'] > 0 ? round($item['totalResponseMs'] / $item['requests'], 2) : null,
-                'maxResponseMs' => $item['hasRt'] ? round($item['maxResponseMs'], 2) : null,
+        // analyze
+        $endpointAnalytics=collect($endpointStats)->map(function($item){
+        $avg=$item['hasRt']&&$item['requests']>0
+            ?round($item['totalResponseMs']/$item['requests'],2)
+            :null;
+        return[
+                'endpoint'=>$item['endpoint'],
+                'requests'=>$item['requests'],
+                'avgResponseMs'=>$avg,
+                'minResponseMs'=>$item['minResponseMs'],
+                'maxResponseMs'=>$item['maxResponseMs'],
+                'bytes'=>$item['bytes'],
+                '2xx'=>$item['2xx'],
+                '3xx'=>$item['3xx'],
+                '4xx'=>$item['4xx'],
+                '5xx'=>$item['5xx'],
+                'lastAccess'=>$item['lastAccess'],
             ];
-        }, array_slice($endpointStats, 0, 10));
+        });
 
-        // Sort Slow Endpoints
-        usort($slowEntries, fn ($a, $b) => ($b->responseTimeMs ?? 0) <=> ($a->responseTimeMs ?? 0));
-        $slowEndpoints = array_map(function (ApacheLogEntryData $e) {
-            return [
-                'endpoint' => $e->endpoint,
-                'method' => $e->method,
-                'responseTimeMs' => $e->responseTimeMs,
-                'statusCode' => $e->statusCode,
-                'ip' => $e->ip,
-                'timestamp' => $e->timestamp,
-            ];
-        }, array_slice($slowEntries, 0, 10));
+        $topEndpoints=$this->endpointAnalytics->topRequests($endpointAnalytics);
 
         // Sort Top Client IPs
         usort($clientStats, fn ($a, $b) => $b['requests'] <=> $a['requests']);
@@ -230,7 +281,7 @@ class ApacheMonitoringService
         $successRate = $totalRequests > 0 ? round(($totalSuccesses / $totalRequests) * 100, 2) : 100.0;
 
         // 2. Slow Request Count (>500ms)
-        $slowRequestCount = count($slowEntries);
+        $slowRequestCount = count($slowEndpoints);
 
         // 3. Peak Request Minute & Average Request Minute
         $peakMinuteKey = '-';
@@ -255,7 +306,7 @@ class ApacheMonitoringService
 
             $healthScore -= ($p5xx * 5.0); // Penalty for 5xx errors
             $healthScore -= ($p4xx * 1.5); // Penalty for 4xx errors
-            $healthScore -= ($pSlow * 2.0); // Penalty for very slow requests (>1s)
+            $healthScore -= ($pSlow * 2.0); // Penalty for very slow requests (>3s)
 
             if ($averageResponseTimeMs !== null && $averageResponseTimeMs > self::RESPONSE_SLOW_MS) {
                 $healthScore -= 10.0;
@@ -286,7 +337,7 @@ class ApacheMonitoringService
                 'type' => 'warning',
                 'icon' => 'bi-hourglass-bottom',
                 'title' => 'Request Lambat (> 3 Detik)',
-                'message' => "Terdapat <strong>{$slowRequestCount}</strong> request dengan response time lebih dari 1 detik. Pertimbangkan optimasi query database atau caching.",
+                'message' => "Terdapat <strong>{$slowRequestCount}</strong> request dengan response time lebih dari 3 detik. Pertimbangkan optimasi query database atau caching.",
             ];
         }
         if ($hasResponseTime && $averageResponseTimeMs > self::RESPONSE_SLOW_MS) {
@@ -319,8 +370,9 @@ class ApacheMonitoringService
             hasResponseTime: $hasResponseTime,
             logFound: true,
             logPath: null,
-            topEndpoints: $topEndpoints,
-            slowEndpoints: $slowEndpoints,
+            topEndpoints:$topEndpoints,
+            endpointAnalytics:$endpointAnalytics->values()->all(),
+            slowEndpoints:$slowEndpoints,
             topClientIps: $topClientIps,
             errorEndpoints: $errorEndpoints,
             responseTimeDistribution: [
