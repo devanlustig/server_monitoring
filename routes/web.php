@@ -19,6 +19,8 @@ Route::resource('servers', MonitoredServerController::class);
 Route::get('/servers/{server}/apache', [ApacheController::class, 'show'])->name('servers.apache');
 Route::get('/servers/{server}/nginx',[NginxController::class, 'show'])->name('servers.nginx');
 Route::get('/servers/{server}/apache/refresh', [ApacheController::class, 'refresh'])->name('servers.apache.refresh');
+Route::get('/servers/{server}/nginx/refresh', [NginxController::class, 'refresh'])->name('servers.nginx.refresh');
+Route::get('/servers/{server}/nginx/history', [NginxController::class, 'history'])->name('servers.nginx.history');
 
 // PostgreSQL Routes
 Route::get('/servers/{server}/postgresql', [PostgreSqlController::class, 'show'])->name('servers.postgresql');

@@ -28,7 +28,18 @@ class MetricNames
             self::ERROR_RATE => 'Error Rate',
             self::SUCCESS_RATE => 'Success Rate',
             self::SLOW_REQUEST_COUNT => 'Slow Requests',
+        ];
+    }
 
+    public static function nginxSelectable(): array
+    {
+        return [
+            self::REQUESTS_PER_MINUTE => 'Requests / Minute',
+            self::REQUESTS_PER_HOUR => 'Requests / Hour',
+            self::TOTAL_REQUESTS => 'Total Requests',
+            self::TOTAL_TRAFFIC => 'Total Traffic',
+            self::ERROR_RATE => 'Error Rate',
+            self::SUCCESS_RATE => 'Success Rate',
         ];
     }
 }

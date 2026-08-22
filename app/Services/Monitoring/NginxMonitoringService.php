@@ -16,6 +16,7 @@ class NginxMonitoringService
 
         if (! $logFound || empty($entries)) {
             return [
+                'logFound' => $logFound,
                 'totalRequests' => 0,
                 'requestsPerMinute' => 0.0,
                 'requestsPerHour' => 0.0,
@@ -265,6 +266,7 @@ class NginxMonitoringService
         );
 
         return [
+            'logFound' => true,
             'totalRequests' => $totalRequests,
             'requestsPerMinute' => $requestsPerMinute,
             'requestsPerHour' => $requestsPerHour,

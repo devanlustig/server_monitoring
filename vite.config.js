@@ -9,6 +9,7 @@ export default defineConfig({
                 'resources/css/app.css',
                 'resources/js/app.js',
                 'resources/js/monitoring/apache.js',
+                'resources/js/monitoring/nginx.js',
             ],
             refresh: true,
         }),

@@ -23,9 +23,7 @@
         </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <!-- <a href="{{ route('servers.apache', $server) }}" class="btn btn-primary shadow-sm fw-semibold d-flex align-items-center gap-1">
-            <i class="bi bi-server"></i> Apache
-        </a> -->
+    
         <a href="{{ $server->web_server === 'nginx' ? route('servers.nginx', $server) : route('servers.apache', $server) }}" class="btn btn-primary shadow-sm fw-semibold d-flex align-items-center gap-1"><i class="bi bi-server"></i> {{ ucfirst($server->web_server ?? 'Apache') }}</a>
 
         <a href="{{ route('servers.postgresql', $server) }}" class="btn btn-success shadow-sm fw-semibold d-flex align-items-center gap-1">
