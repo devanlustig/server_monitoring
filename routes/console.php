@@ -20,5 +20,5 @@ Schedule::command('monitor:run')
     ->withoutOverlapping();
 
 Schedule::command('monitor:snapshot')
-    ->everyFiveMinutes();
+    ->everyTwoMinutes();
 

@@ -66,9 +66,14 @@
     </div>
 </div>
 
-<!-- Main Partial Content Container -->
-<div id="nginx-main-content">
-    @include('servers.partials.nginx-content')
+<!-- Live Content Container -->
+<div id="nginx-live-content">
+    @include('servers.partials.nginx-live-content')
+</div>
+
+<!-- Historical Analytics Container -->
+<div id="nginx-historical-content">
+    @include('servers.partials.nginx-historical-content')
 </div>
 
 @endsection

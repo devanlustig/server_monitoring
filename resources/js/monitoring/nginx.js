@@ -56,9 +56,22 @@ function renderNginxTimelineChart(labels, data) {
 function renderHistoryChart(labels, values) {
     const canvas = document.getElementById('historyResponseChart');
     if (!canvas) return;
+
+    const emptyState = document.getElementById('historyChartEmptyState');
+
     if (historyChart) {
         historyChart.destroy();
     }
+
+    if (!values || values.length === 0) {
+        if (emptyState) emptyState.classList.remove('d-none');
+        canvas.style.display = 'none';
+        return;
+    }
+
+    if (emptyState) emptyState.classList.add('d-none');
+    canvas.style.display = 'block';
+
     historyChart = new Chart(canvas, {
         type: 'line',
         data: {
@@ -207,9 +220,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const data = await response.json();
 
-            if (data.html && document.getElementById('nginx-main-content')) {
-                document.getElementById('nginx-main-content').innerHTML = data.html;
-                bindHistoryEvents();
+            if (data.html && document.getElementById('nginx-live-content')) {
+                document.getElementById('nginx-live-content').innerHTML = data.html;
             }
 
             if (data.metrics) {

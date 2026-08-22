@@ -12,7 +12,7 @@ class MonitoringSnapshotRunner
 
     public function run(): void
     {
-        $servers = MonitoredServer::all();
+        $servers = MonitoredServer::where('is_active', true)->get();
         $providers = collect(
             config('monitoring.providers', [])
         )->map(

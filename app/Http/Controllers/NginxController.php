@@ -33,7 +33,7 @@ class NginxController extends Controller
             $metrics = $this->service->analyze($parsed);
         }
 
-        $metric = request()->get('metric', MetricNames::AVERAGE_RESPONSE_TIME);
+        $metric = request()->get('metric', MetricNames::REQUESTS_PER_MINUTE);
         $history = $this->loadHistory($server, $metric);
 
         return view('servers.nginx', [
@@ -49,7 +49,6 @@ class NginxController extends Controller
         try {
             $parsed = $this->collector->collect($server);
             $metrics = $this->service->analyze($parsed);
-            $history = $this->loadHistory($server);
         } catch (\Throwable $e) {
             logger()->error("Nginx refresh failed for server {$server->name}: " . $e->getMessage(), [
                 'server_id' => $server->id,
@@ -57,13 +56,11 @@ class NginxController extends Controller
             ]);
             $parsed = ['logFound' => false, 'entries' => []];
             $metrics = $this->service->analyze($parsed);
-            $history = $this->loadHistory($server);
         }
 
-        $html = view('servers.partials.nginx-content', [
+        $html = view('servers.partials.nginx-live-content', [
             'server' => $server,
             'metrics' => $metrics,
-            'history' => $history,
             'traffic' => $this->service->formattedTraffic($metrics['totalTrafficBytes']),
         ])->render();
 
@@ -86,7 +83,7 @@ class NginxController extends Controller
 
     public function history(Request $request, MonitoredServer $server): JsonResponse
     {
-        $metric = $request->get('metric', MetricNames::AVERAGE_RESPONSE_TIME);
+        $metric = $request->get('metric', MetricNames::REQUESTS_PER_MINUTE);
         $period = $request->get('period', '24h');
 
         [$from, $to] = $this->history->resolvePeriod($period);
@@ -121,7 +118,7 @@ class NginxController extends Controller
         ]);
     }
 
-    private function loadHistory(MonitoredServer $server, string $metric = MetricNames::AVERAGE_RESPONSE_TIME): array
+    private function loadHistory(MonitoredServer $server, string $metric = MetricNames::REQUESTS_PER_MINUTE): array
     {
         return [
             'chart' => $this->history->chartLast24Hours(
