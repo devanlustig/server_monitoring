@@ -32,31 +32,67 @@ class NginxSnapshotProvider implements MetricSnapshotProvider
             return [];
         }
 
-        if (! ($metrics['logFound'] ?? false)) {
+        if (! ($parsed['logFound'] ?? false)) {
             return [];
         }
 
         $snapshotAt = now();
+        $nowTimestamp = $snapshotAt->getTimestamp();
+        $twoMinutesAgoTimestamp = $nowTimestamp - 120;
+
+        $intervalEntries = array_filter(
+            $parsed['entries'] ?? [],
+            function ($entry) use ($twoMinutesAgoTimestamp, $nowTimestamp) {
+                if (!isset($entry->dateTime)) {
+                    return false;
+                }
+                $ts = $entry->dateTime->getTimestamp();
+                return $ts >= $twoMinutesAgoTimestamp && $ts <= $nowTimestamp;
+            }
+        );
+
+        $intervalRequests = count($intervalEntries);
+        $totalTrafficBytes = 0;
+        $http4xx = 0;
+        $http5xx = 0;
+
+        foreach ($intervalEntries as $entry) {
+            $totalTrafficBytes += $entry->bytes;
+            $code = $entry->statusCode;
+            if ($code >= 400 && $code < 500) {
+                $http4xx++;
+            } elseif ($code >= 500 && $code < 600) {
+                $http5xx++;
+            }
+        }
+
+        $requestsPerMinute = $intervalRequests / 2.0;
+        $requestsPerHour = $requestsPerMinute * 60.0;
+
+        $errors = $http4xx + $http5xx;
+        $errorRate = $intervalRequests > 0 ? round(($errors / $intervalRequests) * 100, 2) : 0.0;
+        $successRate = 100.0 - $errorRate;
+
         $snapshots = [];
 
         $definitions = [
             MetricNames::TOTAL_REQUESTS =>
-                [$metrics['totalRequests'] ?? 0, 'requests'],
+                [$intervalRequests, 'requests'],
 
             MetricNames::REQUESTS_PER_MINUTE =>
-                [$metrics['requestsPerMinute'] ?? 0, 'req/min'],
+                [$requestsPerMinute, 'req/min'],
 
             MetricNames::REQUESTS_PER_HOUR =>
-                [$metrics['requestsPerHour'] ?? 0, 'req/hour'],
+                [$requestsPerHour, 'req/hour'],
 
             MetricNames::TOTAL_TRAFFIC =>
-                [$metrics['totalTrafficBytes'] ?? 0, 'bytes'],
+                [$totalTrafficBytes, 'bytes'],
 
             MetricNames::ERROR_RATE =>
-                [$metrics['errorRate'] ?? 0, '%'],
+                [$errorRate, '%'],
 
             MetricNames::SUCCESS_RATE =>
-                [$metrics['successRate'] ?? 0, '%'],
+                [$successRate, '%'],
         ];
 
         foreach ($definitions as $metricName => [$value, $unit]) {
