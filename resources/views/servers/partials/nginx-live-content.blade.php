@@ -186,12 +186,13 @@
                 <thead class="table-light">
                     <tr>
                         <th>Endpoint</th>
+                        <th>Source / Application</th>
                         <th class="text-center">Requests</th>
                         <th class="text-center">Traffic</th>
-                        <th class="text-center">2xx</th>
-                        <th class="text-center">3xx</th>
-                        <th class="text-center">4xx</th>
-                        <th class="text-center">5xx</th>
+                        <th class="text-center text-success">2xx</th>
+                        <th class="text-center text-info">3xx</th>
+                        <th class="text-center text-warning">4xx</th>
+                        <th class="text-center text-danger">5xx</th>
                         <th class="text-center">Status</th>
                     </tr>
                 </thead>
@@ -216,6 +217,25 @@
                                 <div class="fw-semibold">
                                     <code>{{ $endpoint['endpoint'] }}</code>
                                 </div>
+                            </td>
+                            <td>
+                                @php
+                                    $source = $resolvedSources[$endpoint['endpoint']] ?? null;
+                                @endphp
+                                @if($source && $source->resolved)
+                                    @if($source->sourceType === 'proxy')
+                                        <span class="badge bg-primary bg-opacity-10 text-primary border me-1">Proxy</span>
+                                        <span class="text-secondary small" title="{{ $source->proxyTarget }}">{{ Str::limit(str_replace('PROXY → ', '', $source->proxyTarget), 25) }}</span>
+                                    @elseif($source->sourceType === 'alias')
+                                        <span class="badge bg-info bg-opacity-10 text-info border me-1">Alias</span>
+                                        <span class="text-secondary small" title="{{ $source->sourcePath }}">{{ Str::limit($source->sourcePath, 25) }}</span>
+                                    @else
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary border me-1">Root</span>
+                                        <span class="text-secondary small" title="{{ $source->sourcePath }}">{{ Str::limit($source->sourcePath, 25) }}</span>
+                                    @endif
+                                @else
+                                    <span class="text-muted small">Unknown / Not Resolved</span>
+                                @endif
                             </td>
                             <td class="text-center">
                                 {{ number_format($endpoint['requests']) }}
@@ -243,7 +263,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="8" class="text-center py-4 text-muted">No endpoint data available</td>
+                            <td colspan="9" class="text-center py-4 text-muted">No endpoint data available</td>
                         </tr>
                     @endforelse
                 </tbody>

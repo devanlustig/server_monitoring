@@ -17,6 +17,7 @@ class NginxController extends Controller
         private readonly NginxCollector $collector,
         private readonly NginxMonitoringService $service,
         private readonly MetricHistoryQueryService $history,
+        private readonly \App\Services\Monitoring\EndpointSourceResolverFactory $resolverFactory,
     ) {}
 
     public function show(MonitoredServer $server): View
@@ -36,11 +37,34 @@ class NginxController extends Controller
         $metric = request()->get('metric', MetricNames::REQUESTS_PER_MINUTE);
         $history = $this->loadHistory($server, $metric);
 
+        // Resolve endpoint sources
+        $endpoints = [];
+        if (!empty($metrics['topEndpoints'])) {
+            foreach ($metrics['topEndpoints'] as $item) {
+                $endpoints[] = $item['endpoint'];
+            }
+        }
+        if (!empty($metrics['errorEndpoints'])) {
+            foreach ($metrics['errorEndpoints'] as $item) {
+                $endpoints[] = $item['endpoint'];
+            }
+        }
+        $endpoints = array_unique($endpoints);
+        $resolvedSources = [];
+        if (!empty($endpoints)) {
+            $resolver = $this->resolverFactory->make('nginx');
+            $resolved = $resolver->resolve($server, $endpoints);
+            foreach ($resolved as $data) {
+                $resolvedSources[$data->endpoint] = $data;
+            }
+        }
+
         return view('servers.nginx', [
             'server' => $server,
             'metrics' => $metrics,
             'history' => $history,
             'traffic' => $this->service->formattedTraffic($metrics['totalTrafficBytes']),
+            'resolvedSources' => $resolvedSources,
         ]);
     }
 
@@ -58,10 +82,33 @@ class NginxController extends Controller
             $metrics = $this->service->analyze($parsed);
         }
 
+        // Resolve endpoint sources
+        $endpoints = [];
+        if (!empty($metrics['topEndpoints'])) {
+            foreach ($metrics['topEndpoints'] as $item) {
+                $endpoints[] = $item['endpoint'];
+            }
+        }
+        if (!empty($metrics['errorEndpoints'])) {
+            foreach ($metrics['errorEndpoints'] as $item) {
+                $endpoints[] = $item['endpoint'];
+            }
+        }
+        $endpoints = array_unique($endpoints);
+        $resolvedSources = [];
+        if (!empty($endpoints)) {
+            $resolver = $this->resolverFactory->make('nginx');
+            $resolved = $resolver->resolve($server, $endpoints);
+            foreach ($resolved as $data) {
+                $resolvedSources[$data->endpoint] = $data;
+            }
+        }
+
         $html = view('servers.partials.nginx-live-content', [
             'server' => $server,
             'metrics' => $metrics,
             'traffic' => $this->service->formattedTraffic($metrics['totalTrafficBytes']),
+            'resolvedSources' => $resolvedSources,
         ])->render();
 
         return response()->json([

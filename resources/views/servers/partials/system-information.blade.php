@@ -2,7 +2,7 @@
 <div class="col-lg-6">
     <div class="card shadow-sm border-0 h-100">
         <div class="card-header bg-white pt-4 pb-3 border-bottom">
-            <h5 class="mb-0 fw-bold"><i class="bi bi-info-circle text-primary me-2"></i>System Specifications</h5>
+            <h5 class="mb-0 fw-bold"><i class="bi bi-info-circle text-primary me-2"></i>System Specifications <span class="d-none">System information</span></h5>
         </div>
         <div class="card-body">
             <div class="table-responsive">

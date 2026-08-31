@@ -166,7 +166,10 @@ class MonitoredServerController extends Controller
 
         $cpuHistory=$server->cpuMetrics()->latest('collected_at')->limit(20)->get()->reverse();
         $chartLabels=$cpuHistory->map(fn($m)=>$m->collected_at->format('H:i:s'))->values();
-        $chartData=$cpuHistory->map(fn($m)=>$m->usage_percent)->values();
+        $chartData=$cpuHistory->map(fn($m)=>[
+            'y' => (float)$m->usage_percent,
+            'timestamp' => $m->collected_at->toDateTimeString()
+        ])->values();
 
         return response()->json([
             'header'=>view('servers.partials.header',compact('server','latestMetric','latestMemory','latestDisk'))->render(),

@@ -19,6 +19,7 @@ class ApacheController extends Controller
         private readonly ApacheMonitoringService $service,
         private readonly MetricHistoryQueryService $history,
         private readonly EndpointAnalyticsService $analytics,
+        private readonly \App\Services\Monitoring\EndpointSourceResolverFactory $resolverFactory,
     ){}
 
     public function show(MonitoredServer $server): View
@@ -39,11 +40,45 @@ class ApacheController extends Controller
         $history = $this->loadHistory($server,$metric);
         $analytics=$this->loadAnalytics($metrics->endpointAnalytics);
 
+        // Resolve endpoint sources
+        $endpoints = [];
+        foreach ($analytics as $list) {
+            foreach ($list as $item) {
+                if (isset($item['endpoint'])) {
+                    $endpoints[] = $item['endpoint'];
+                }
+            }
+        }
+        $endpoints = array_unique($endpoints);
+        $resolvedSources = [];
+        if (!empty($endpoints)) {
+            $resolver = $this->resolverFactory->make('apache');
+            if (method_exists($resolver, 'setVirtualHost')) {
+                $vhosts = [];
+                if (isset($parsed['entries']) && is_array($parsed['entries'])) {
+                    foreach ($parsed['entries'] as $entry) {
+                        if (!empty($entry->virtualHost)) {
+                            $vhosts[$entry->virtualHost] = ($vhosts[$entry->virtualHost] ?? 0) + 1;
+                        }
+                    }
+                }
+                if (!empty($vhosts)) {
+                    arsort($vhosts);
+                    $resolver->setVirtualHost(key($vhosts));
+                }
+            }
+            $resolved = $resolver->resolve($server, $endpoints);
+            foreach ($resolved as $data) {
+                $resolvedSources[$data->endpoint] = $data;
+            }
+        }
+
         return view('servers.apache', [
             'server' => $server,
             'metrics' => $metrics,
             'history' => $history,
             'analytics'=>$analytics,
+            'resolvedSources' => $resolvedSources,
         ]);
     }
 
@@ -58,12 +93,33 @@ class ApacheController extends Controller
             throw $e;
         }
         $analytics=$this->loadAnalytics($metrics->endpointAnalytics);
+
+        // Resolve endpoint sources
+        $endpoints = [];
+        foreach ($analytics as $list) {
+            foreach ($list as $item) {
+                if (isset($item['endpoint'])) {
+                    $endpoints[] = $item['endpoint'];
+                }
+            }
+        }
+        $endpoints = array_unique($endpoints);
+        $resolvedSources = [];
+        if (!empty($endpoints)) {
+            $resolver = $this->resolverFactory->make('apache');
+            $resolved = $resolver->resolve($server, $endpoints);
+            foreach ($resolved as $data) {
+                $resolvedSources[$data->endpoint] = $data;
+            }
+        }
+
         $html = view('servers.partials.apache-content',
         [
             'server'  => $server,
             'metrics' => $metrics,
             'history' => $history,
-            'analytics' => $analytics
+            'analytics' => $analytics,
+            'resolvedSources' => $resolvedSources,
         ]
         )->render();
 

@@ -31,5 +31,6 @@ Route::post('/servers/{server}/postgresql/kill-selected', [PostgreSqlController:
 Route::post('/servers/{server}/postgresql/capture', [PostgreSqlIncidentController::class, 'capture'])->name('servers.postgresql.capture');
 Route::post('/servers/{server}/postgresql/restart', [PostgreSqlController::class, 'restart'])->name('servers.postgresql.restart');
 Route::get('/servers/{server}/status', [MonitoredServerController::class, 'status'])->name('servers.status');
+Route::get('/servers/{server}/cpu-analysis', [\App\Http\Controllers\Api\CpuAnalysisController::class, 'analyze'])->name('servers.cpu-analysis');
 
 Route::get('/servers/{server}/apache/history',[ApacheController::class, 'history'])->name('servers.apache.history');
