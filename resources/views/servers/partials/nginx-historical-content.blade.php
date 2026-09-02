@@ -63,6 +63,87 @@
                     </div>
                     <canvas id="historyResponseChart"></canvas>
                 </div>
+
+                <!-- Request & Endpoint Analysis Node Graph Panel -->
+                <div id="nginx-request-analysis-container" class="mt-4 pt-3 border-top" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h6 class="fw-bold mb-0 text-primary">
+                                <i class="bi bi-diagram-3-fill me-2"></i>Request & Endpoint Breakdown
+                            </h6>
+                            <small class="text-muted">Analyzed Window: <span id="nginx-analysis-timestamp" class="fw-semibold text-dark">-</span></small>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary" id="nginx-close-analysis-btn">
+                            <i class="bi bi-x-lg me-1"></i>Close Analysis
+                        </button>
+                    </div>
+
+                    <!-- Summary Badges -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <div class="p-2 border rounded bg-light d-flex align-items-center justify-content-between">
+                                <span class="small text-muted">Total Requests in Window</span>
+                                <span class="fw-bold fs-6" id="nginx-analysis-total-req">0</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-2 border rounded bg-light d-flex align-items-center justify-content-between">
+                                <span class="small text-muted">Active Endpoints</span>
+                                <span class="fw-bold fs-6 text-primary" id="nginx-analysis-active-ep">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div id="nginx-analysis-loading" class="text-center py-4 d-none">
+                        <div class="spinner-border text-primary spinner-border-sm me-2" role="status"></div>
+                        <span class="text-muted small">Analyzing requests & resolving endpoint sources...</span>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div id="nginx-analysis-empty" class="text-center py-4 d-none">
+                        <i class="bi bi-inbox fs-3 text-muted d-block mb-1"></i>
+                        <span class="text-muted small">No request logs recorded near this timestamp.</span>
+                    </div>
+
+                    <!-- Node Graph Visual & Details Panel -->
+                    <div id="nginx-analysis-content" class="row g-3 align-items-start">
+                        <!-- Node Graph Visual (Left Column) -->
+                        <div class="col-lg-7">
+                            <div class="border rounded p-3 bg-light position-relative d-flex flex-column align-items-center" style="min-height: 320px;">
+                                <!-- Parent Node: Total Requests -->
+                                <div class="card text-center shadow-sm border-primary mb-4 node-interactive" id="nginx-node-parent" style="width: 180px; cursor: pointer; transition: transform 0.15s ease;">
+                                    <div class="card-header bg-primary text-white py-1 small fw-bold">Total Requests</div>
+                                    <div class="card-body py-2">
+                                        <h4 class="mb-0 fw-bold text-primary" id="nginx-parent-req-val">0</h4>
+                                        <small class="text-muted" id="nginx-parent-req-rate">0 req/min</small>
+                                    </div>
+                                </div>
+
+                                <!-- Children Endpoint Nodes Container -->
+                                <div id="nginx-endpoint-nodes-list" class="d-flex justify-content-center flex-wrap gap-2 w-100">
+                                    <!-- Populated dynamically by JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Selected Endpoint Detail Panel (Right Column) -->
+                        <div class="col-lg-5">
+                            <div class="card border shadow-sm">
+                                <div class="card-header bg-white py-2 fw-bold small d-flex justify-content-between align-items-center">
+                                    <span><i class="bi bi-info-circle me-1 text-primary"></i>Endpoint Details</span>
+                                    <span class="badge bg-secondary" id="nginx-ep-detail-badge">Select Endpoint</span>
+                                </div>
+                                <div class="card-body p-3">
+                                    <div id="nginx-ep-detail-body">
+                                        <p class="text-muted small mb-0">Click any endpoint node on the graph to inspect HTTP status breakdown and source resolution details.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>

@@ -7,6 +7,7 @@ use App\Services\Monitoring\Collectors\NginxCollector;
 use App\Services\Monitoring\NginxMonitoringService;
 use App\Services\Monitoring\History\MetricHistoryQueryService;
 use App\Services\Monitoring\Support\MetricNames;
+use App\Services\Monitoring\Analytics\WebServerRequestAnalysisService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -18,6 +19,7 @@ class NginxController extends Controller
         private readonly NginxMonitoringService $service,
         private readonly MetricHistoryQueryService $history,
         private readonly \App\Services\Monitoring\EndpointSourceResolverFactory $resolverFactory,
+        private readonly WebServerRequestAnalysisService $analysisService,
     ) {}
 
     public function show(MonitoredServer $server): View
@@ -118,7 +120,7 @@ class NginxController extends Controller
                 'requestsPerMinute' => $metrics['requestsPerMinute'],
                 'requestsPerHour' => $metrics['requestsPerHour'],
                 'totalTraffic' => $this->service->formattedTraffic($metrics['totalTrafficBytes']),
-                'averageResponseTimeMs' => null, // Nginx doesn't log response time by default in combined log
+                'averageResponseTimeMs' => null,
                 'http2xx' => $metrics['http2xx'],
                 'http3xx' => $metrics['http3xx'],
                 'http4xx' => $metrics['http4xx'],
@@ -161,8 +163,17 @@ class NginxController extends Controller
             'chart' => [
                 'labels' => $chart->labels,
                 'values' => $chart->values,
+                'timestamps' => $chart->timestamps,
             ],
         ]);
+    }
+
+    public function requestAnalysis(Request $request, MonitoredServer $server): JsonResponse
+    {
+        $timestamp = $request->get('timestamp', now()->toDateTimeString());
+        $result = $this->analysisService->analyze($server, $timestamp);
+
+        return response()->json($result);
     }
 
     private function loadHistory(MonitoredServer $server, string $metric = MetricNames::REQUESTS_PER_MINUTE): array

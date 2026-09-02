@@ -162,6 +162,10 @@ class MetricHistoryQueryService
                 ->pluck('metric_value')
                 ->map(fn ($value) => round($value,2))
                 ->toArray(),
+            timestamps: $series
+                ->pluck('snapshot_at')
+                ->map(fn ($time) => $time->toDateTimeString())
+                ->toArray(),
         );
     }
 

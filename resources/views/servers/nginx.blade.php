@@ -83,6 +83,7 @@
 window.nginxConfig = {
     refreshUrl: "{{ route('servers.nginx.refresh', $server) }}",
     historyUrl: "{{ route('servers.nginx.history', $server) }}",
+    requestAnalysisUrl: "{{ route('servers.nginx.request-analysis', $server) }}",
 
     initialTimeline: {
         labels: @json($metrics['requestTimeline']['labels'] ?? []),
@@ -91,7 +92,8 @@ window.nginxConfig = {
 
     initialHistory: {
         labels: @json($history['chart']->labels),
-        values: @json($history['chart']->values)
+        values: @json($history['chart']->values),
+        timestamps: @json($history['chart']->timestamps)
     },
 
     httpStatus: {

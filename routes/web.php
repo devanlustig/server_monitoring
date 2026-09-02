@@ -34,3 +34,5 @@ Route::get('/servers/{server}/status', [MonitoredServerController::class, 'statu
 Route::get('/servers/{server}/cpu-analysis', [\App\Http\Controllers\Api\CpuAnalysisController::class, 'analyze'])->name('servers.cpu-analysis');
 
 Route::get('/servers/{server}/apache/history',[ApacheController::class, 'history'])->name('servers.apache.history');
+Route::get('/servers/{server}/apache/request-analysis', [ApacheController::class, 'requestAnalysis'])->name('servers.apache.request-analysis');
+Route::get('/servers/{server}/nginx/request-analysis', [NginxController::class, 'requestAnalysis'])->name('servers.nginx.request-analysis');
