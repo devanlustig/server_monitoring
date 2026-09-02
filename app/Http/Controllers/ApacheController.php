@@ -8,6 +8,7 @@ use App\Services\Monitoring\Collectors\ApacheCollector;
 use App\Services\Monitoring\History\MetricHistoryQueryService;
 use App\Services\Monitoring\Support\MetricNames;
 use App\Services\Monitoring\Analytics\EndpointAnalyticsService;
+use App\Services\Monitoring\Analytics\WebServerRequestAnalysisService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\View\View;
 use Illuminate\Http\Request;
@@ -19,8 +20,8 @@ class ApacheController extends Controller
         private readonly ApacheMonitoringService $service,
         private readonly MetricHistoryQueryService $history,
         private readonly EndpointAnalyticsService $analytics,
-        private readonly \App\Services\Monitoring\EndpointSourceResolverFactory $resolverFactory,
-    ){}
+        private readonly WebServerRequestAnalysisService $analysisService,
+    ) {}
 
     public function show(MonitoredServer $server): View
     {
@@ -36,49 +37,15 @@ class ApacheController extends Controller
             $metrics = $this->service->analyze($parsed);
         }
 
-        $metric = request()->get('metric',MetricNames::AVERAGE_RESPONSE_TIME);
-        $history = $this->loadHistory($server,$metric);
-        $analytics=$this->loadAnalytics($metrics->endpointAnalytics);
-
-        // Resolve endpoint sources
-        $endpoints = [];
-        foreach ($analytics as $list) {
-            foreach ($list as $item) {
-                if (isset($item['endpoint'])) {
-                    $endpoints[] = $item['endpoint'];
-                }
-            }
-        }
-        $endpoints = array_unique($endpoints);
-        $resolvedSources = [];
-        if (!empty($endpoints)) {
-            $resolver = $this->resolverFactory->make('apache');
-            if (method_exists($resolver, 'setVirtualHost')) {
-                $vhosts = [];
-                if (isset($parsed['entries']) && is_array($parsed['entries'])) {
-                    foreach ($parsed['entries'] as $entry) {
-                        if (!empty($entry->virtualHost)) {
-                            $vhosts[$entry->virtualHost] = ($vhosts[$entry->virtualHost] ?? 0) + 1;
-                        }
-                    }
-                }
-                if (!empty($vhosts)) {
-                    arsort($vhosts);
-                    $resolver->setVirtualHost(key($vhosts));
-                }
-            }
-            $resolved = $resolver->resolve($server, $endpoints);
-            foreach ($resolved as $data) {
-                $resolvedSources[$data->endpoint] = $data;
-            }
-        }
+        $metric = request()->get('metric', MetricNames::AVERAGE_RESPONSE_TIME);
+        $history = $this->loadHistory($server, $metric);
+        $analytics = $this->loadAnalytics($metrics->endpointAnalytics);
 
         return view('servers.apache', [
             'server' => $server,
             'metrics' => $metrics,
             'history' => $history,
-            'analytics'=>$analytics,
-            'resolvedSources' => $resolvedSources,
+            'analytics' => $analytics,
         ]);
     }
 
@@ -88,40 +55,18 @@ class ApacheController extends Controller
             $parsed = $this->collector->collect($server);
             $metrics = $this->service->analyze($parsed);
             $history = $this->loadHistory($server);
-
         } catch (\Throwable $e) {
             throw $e;
         }
-        $analytics=$this->loadAnalytics($metrics->endpointAnalytics);
 
-        // Resolve endpoint sources
-        $endpoints = [];
-        foreach ($analytics as $list) {
-            foreach ($list as $item) {
-                if (isset($item['endpoint'])) {
-                    $endpoints[] = $item['endpoint'];
-                }
-            }
-        }
-        $endpoints = array_unique($endpoints);
-        $resolvedSources = [];
-        if (!empty($endpoints)) {
-            $resolver = $this->resolverFactory->make('apache');
-            $resolved = $resolver->resolve($server, $endpoints);
-            foreach ($resolved as $data) {
-                $resolvedSources[$data->endpoint] = $data;
-            }
-        }
+        $analytics = $this->loadAnalytics($metrics->endpointAnalytics);
 
-        $html = view('servers.partials.apache-content',
-        [
-            'server'  => $server,
+        $html = view('servers.partials.apache-content', [
+            'server' => $server,
             'metrics' => $metrics,
             'history' => $history,
             'analytics' => $analytics,
-            'resolvedSources' => $resolvedSources,
-        ]
-        )->render();
+        ])->render();
 
         return response()->json([
             'html' => $html,
@@ -140,44 +85,11 @@ class ApacheController extends Controller
         ]);
     }
 
-    private function loadHistory(MonitoredServer $server,string $metric = MetricNames::AVERAGE_RESPONSE_TIME): array{
-
-        return [
-            'chart' => $this->history->chartLast24Hours(
-                server: $server,
-                category: 'apache',
-                metricName: $metric,
-            ),
-
-            'summary' => $this->history->summaryLast24Hours(
-                server: $server,
-                category: 'apache',
-                metricName: $metric,
-            ),
-        ];
-    }
-
-    private function loadAnalytics(array $endpointAnalytics): array
+    public function history(Request $request, MonitoredServer $server): JsonResponse
     {
-        $collection=collect($endpointAnalytics);
-
-        return[
-            'topRequests'=>$this->analytics->topRequests($collection),
-            'topSlow'=>$this->analytics->topSlow($collection),
-            'topTraffic'=>$this->analytics->topTraffic($collection),
-            'topErrors'=>$this->analytics->topErrors($collection),
-        ];
-    }
-
-    public function history(Request $request,MonitoredServer $server
-    ): JsonResponse {
-
-        $metric = $request->get(
-            'metric',
-            MetricNames::AVERAGE_RESPONSE_TIME
-        );
-
+        $metric = $request->get('metric', MetricNames::AVERAGE_RESPONSE_TIME);
         $period = $request->get('period', '24h');
+
         [$from, $to] = $this->history->resolvePeriod($period);
         $chart = $this->history->chart(
             server: $server,
@@ -195,7 +107,6 @@ class ApacheController extends Controller
         );
 
         return response()->json([
-
             'summary' => [
                 'current' => $summary->current,
                 'average' => $summary->average,
@@ -203,16 +114,48 @@ class ApacheController extends Controller
                 'minimum' => $summary->minimum,
                 'trendPercent' => $summary->trendPercent,
                 'difference' => $summary->difference,
-
             ],
-
             'chart' => [
                 'labels' => $chart->labels,
                 'values' => $chart->values,
-
+                'timestamps' => $chart->timestamps,
             ],
-
         ]);
     }
 
+    public function requestAnalysis(Request $request, MonitoredServer $server): JsonResponse
+    {
+        $timestamp = $request->get('timestamp', now()->toDateTimeString());
+        $result = $this->analysisService->analyze($server, $timestamp);
+
+        return response()->json($result);
+    }
+
+    private function loadHistory(MonitoredServer $server, string $metric = MetricNames::AVERAGE_RESPONSE_TIME): array
+    {
+        return [
+            'chart' => $this->history->chartLast24Hours(
+                server: $server,
+                category: 'apache',
+                metricName: $metric,
+            ),
+            'summary' => $this->history->summaryLast24Hours(
+                server: $server,
+                category: 'apache',
+                metricName: $metric,
+            ),
+        ];
+    }
+
+    private function loadAnalytics(array $endpointAnalytics): array
+    {
+        $collection = collect($endpointAnalytics);
+
+        return [
+            'topRequests' => $this->analytics->topRequests($collection),
+            'topSlow' => $this->analytics->topSlow($collection),
+            'topTraffic' => $this->analytics->topTraffic($collection),
+            'topErrors' => $this->analytics->topErrors($collection),
+        ];
+    }
 }

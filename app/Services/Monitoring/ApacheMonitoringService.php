@@ -224,7 +224,7 @@ class ApacheMonitoringService
         }
 
         usort($slowEndpoints,fn($a,$b)=>$b['responseTimeMs']<=>$a['responseTimeMs']);
-        $slowEndpoints=array_slice($slowEndpoints,0,20);
+        $slowEndpoints=array_slice($slowEndpoints,0,15);
 
         // Rates
         $timeWindowMinutes = 1.0;

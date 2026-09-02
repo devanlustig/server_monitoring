@@ -36,7 +36,6 @@ class ApacheSnapshotProvider implements MetricSnapshotProvider
         $snapshots = [];
 
         $definitions = [
-
             MetricNames::TOTAL_REQUESTS =>
                 [$metrics->totalRequests, 'requests'],
 
@@ -46,20 +45,8 @@ class ApacheSnapshotProvider implements MetricSnapshotProvider
             MetricNames::REQUESTS_PER_HOUR =>
                 [$metrics->requestsPerHour, 'req/hour'],
 
-            MetricNames::TOTAL_TRAFFIC_BYTES =>
+            MetricNames::TOTAL_TRAFFIC =>
                 [$metrics->totalTrafficBytes, 'bytes'],
-
-            MetricNames::HTTP_2XX =>
-                [$metrics->http2xx, 'requests'],
-
-            MetricNames::HTTP_3XX =>
-                [$metrics->http3xx, 'requests'],
-
-            MetricNames::HTTP_4XX =>
-                [$metrics->http4xx, 'requests'],
-
-            MetricNames::HTTP_5XX =>
-                [$metrics->http5xx, 'requests'],
 
             MetricNames::ERROR_RATE =>
                 [$metrics->errorRate, '%'],

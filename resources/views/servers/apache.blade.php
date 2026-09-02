@@ -66,38 +66,43 @@
     </div>
 </div>
 
-<!-- Main Partial Content Container -->
-<div id="apache-main-content">
+<!-- Live Content Container -->
+<div id="apache-live-content">
     @include('servers.partials.apache-content')
+</div>
+
+<!-- Historical Analytics Container -->
+<div id="apache-historical-content">
+    @include('servers.partials.apache-historical-content')
 </div>
 
 @endsection
 
 @push('scripts')
 <script>
-window.apacheConfig={
-    refreshUrl:"{{ route('servers.apache.refresh',$server) }}",
-    historyUrl:"{{ route('servers.apache.history',$server) }}",
+window.apacheConfig = {
+    refreshUrl: "{{ route('servers.apache.refresh', $server) }}",
+    historyUrl: "{{ route('servers.apache.history', $server) }}",
+    requestAnalysisUrl: "{{ route('servers.apache.request-analysis', $server) }}",
 
-    initialTimeline:{
-        labels:@json($metrics->requestTimeline['labels']??[]),
-        data:@json($metrics->requestTimeline['data']??[])
+    initialTimeline: {
+        labels: @json($metrics->requestTimeline['labels'] ?? []),
+        data: @json($metrics->requestTimeline['data'] ?? [])
     },
 
-    initialHistory:{
-        labels:@json($history['chart']->labels),
-        values:@json($history['chart']->values)
+    initialHistory: {
+        labels: @json($history['chart']->labels),
+        values: @json($history['chart']->values),
+        timestamps: @json($history['chart']->timestamps)
     },
 
-    httpStatus:{
-        success:{{ $metrics->http2xx }},
-        redirect:{{ $metrics->http3xx }},
-        client:{{ $metrics->http4xx }},
-        server:{{ $metrics->http5xx }}
+    httpStatus: {
+        success: {{ $metrics->http2xx }},
+        redirect: {{ $metrics->http3xx }},
+        client: {{ $metrics->http4xx }},
+        server: {{ $metrics->http5xx }}
     }
-
 };
-
 </script>
 
 @vite('resources/js/monitoring/apache.js')
