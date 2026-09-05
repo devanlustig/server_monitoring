@@ -41,10 +41,15 @@ class CpuCorrelationEngine
         $cpuValue = $cpuMetric ? (float) $cpuMetric->usage_percent : 0.0;
         $actualTime = $cpuMetric ? $cpuMetric->collected_at->toDateTimeString() : $timestamp;
 
-        // 2. Fetch historical snapshots in the window
-        $snapshots = MetricHistory::where('monitored_server_id', $server->id)
-            ->whereBetween('snapshot_at', [$windowStart, $windowEnd])
-            ->get();
+        // 2. Fetch historical snapshots in the window, ordered by proximity to targetTime
+        $querySnapshots = MetricHistory::where('monitored_server_id', $server->id)
+            ->whereBetween('snapshot_at', [$windowStart, $windowEnd]);
+        if (DB::getDriverName() === 'sqlite') {
+            $querySnapshots->orderByRaw('ABS(strftime(\'%s\', snapshot_at) - strftime(\'%s\', ?))', [$targetTime->toDateTimeString()]);
+        } else {
+            $querySnapshots->orderByRaw('ABS(EXTRACT(EPOCH FROM (snapshot_at - ?)))', [$targetTime->toDateTimeString()]);
+        }
+        $snapshots = $querySnapshots->get();
 
         // 3. Fetch 24h baseline data
         $baselineStart = $targetTime->copy()->subHours(24);
@@ -80,12 +85,7 @@ class CpuCorrelationEngine
         // 5. Get Baselines
         $baseReqsMin = (float) ($baselines->get("{$webCategory}:requests_per_minute")?->avg_value ?? 10.0);
         $baseDbActive = (float) ($baselines->get("postgresql:active_connections")?->avg_value ?? 2.0);
-        
-        $baseCpuWeb = (float) ($baselines->get("process_category_cpu:web_server")?->avg_value ?? 5.0);
-        $baseCpuDb = (float) ($baselines->get("process_category_cpu:database")?->avg_value ?? 5.0);
-        $baseCpuCron = (float) ($baselines->get("process_category_cpu:cron_scheduler")?->avg_value ?? 2.0);
-        $baseCpuQueue = (float) ($baselines->get("process_category_cpu:automation_queue")?->avg_value ?? 2.0);
-        $baseCpuOther = (float) ($baselines->get("process_category_cpu:system_other")?->avg_value ?? 5.0);
+        $baseDbQueries = (float) ($baselines->get("postgresql:active_queries")?->avg_value ?? 0.5);
 
         // 6. Scoring Calculations
         // A. Application Request Correlation
@@ -93,19 +93,34 @@ class CpuCorrelationEngine
         $appScore = 0.0;
         if ($cpuValue > 10.0) {
             $appScore += $processCpuWeb * 0.8;
-            if ($reqIncrease > 20) {
+            if ($currentReqsMin > $baseReqsMin && $reqIncrease > 20) {
                 $appScore += min(30, $reqIncrease * 0.3);
             }
         }
         $appScore = max(0.0, min(100.0, $appScore));
 
-        // B. Database Correlation
-        $dbIncrease = $baseDbActive > 0 ? (($currentDbActive - $baseDbActive) / $baseDbActive) * 100 : 0;
+        // B. Database Correlation (Requires Postgres CPU or active query count evidence)
         $dbScore = 0.0;
         if ($cpuValue > 10.0) {
+            // DB process CPU contributes strongly
             $dbScore += $processCpuDb * 0.9;
-            if ($dbIncrease > 20) {
-                $dbScore += min(20, $dbIncrease * 0.2);
+            
+            // Active queries evidence (> 3 or significant spike)
+            if ($currentDbQueries >= 3) {
+                $dbScore += min(30, $currentDbQueries * 5);
+            } elseif ($currentDbQueries > $baseDbQueries && $baseDbQueries > 0) {
+                $queryIncrease = (($currentDbQueries - $baseDbQueries) / $baseDbQueries) * 100;
+                if ($queryIncrease > 50) {
+                    $dbScore += min(20, $queryIncrease * 0.2);
+                }
+            }
+
+            // Connection increase only adds minor weight if active queries or DB CPU exists
+            if (($processCpuDb > 2.0 || $currentDbQueries >= 2) && $baseDbActive > 0) {
+                $dbIncrease = (($currentDbActive - $baseDbActive) / $baseDbActive) * 100;
+                if ($dbIncrease > 50) {
+                    $dbScore += min(15, $dbIncrease * 0.1);
+                }
             }
         }
         $dbScore = max(0.0, min(100.0, $dbScore));
@@ -124,15 +139,13 @@ class CpuCorrelationEngine
         }
         $queueScore = max(0.0, min(100.0, $queueScore));
 
-        // E. Web Server process specific CPU
-        $webServerScore = min(100.0, $processCpuWeb * 1.1);
-
-        // F. System Process
+        // E. System Process Correlation (Exclude DB/Web/Cron process names from unclassified System score)
         $systemScore = 0.0;
         if ($cpuValue > 10.0) {
-            // High process CPU not classified in above categories
             $systemScore = $processCpuOther * 1.0;
-            if ($appScore < 40 && $dbScore < 40 && $cronScore < 40 && $queueScore < 40 && $topProcessCpu > 50) {
+            $isKnownCategoryProcess = in_array(strtolower($topProcessName), ['postgres', 'postgresql', 'php', 'php-fpm', 'nginx', 'apache', 'apache2', 'httpd']);
+            
+            if (!$isKnownCategoryProcess && $appScore < 40 && $dbScore < 40 && $cronScore < 40 && $queueScore < 40 && $topProcessCpu > 30) {
                 $systemScore = max($systemScore, $topProcessCpu);
             }
         }
@@ -155,6 +168,13 @@ class CpuCorrelationEngine
         elseif ($highestScore >= 60) $confidence = 'Likely Cause';
         elseif ($highestScore >= 30) $confidence = 'Contributing Factor';
 
+        // Determine final cause label
+        if ($highestScore >= 30) {
+            $causeLabel = $primaryCause;
+        } else {
+            $causeLabel = $cpuValue > 30.0 ? 'Unknown / Uncorrelated' : 'Idle / Normal';
+        }
+
         // Evidence preparation
         $evidence = [];
         if ($appScore >= 30) {
@@ -162,7 +182,7 @@ class CpuCorrelationEngine
             $evidence[] = "Web/PHP processes consumed " . number_format($processCpuWeb, 1) . "% CPU.";
         }
         if ($dbScore >= 30) {
-            $evidence[] = "Database active connections/queries: {$currentDbActive} active (baseline: " . number_format($baseDbActive, 1) . ", +" . number_format($dbIncrease, 1) . "%).";
+            $evidence[] = "Database active queries: {$currentDbQueries}, active connections: {$currentDbActive} (baseline queries: " . number_format($baseDbQueries, 1) . ").";
             $evidence[] = "Postgres processes consumed " . number_format($processCpuDb, 1) . "% CPU.";
         }
         if ($cronScore >= 30) {
@@ -171,7 +191,7 @@ class CpuCorrelationEngine
         if ($queueScore >= 30) {
             $evidence[] = "Active Queue workers/Horizon workers detected, consuming " . number_format($processCpuQueue, 1) . "% CPU.";
         }
-        if ($topProcessCpu > 10.0) {
+        if ($topProcessCpu > 10.0 && $systemScore >= 30) {
             $evidence[] = "Process '{$topProcessName}' was the highest single consumer at " . number_format($topProcessCpu, 1) . "% CPU.";
         }
 
@@ -184,7 +204,7 @@ class CpuCorrelationEngine
             'cpu' => $cpuValue,
             'insufficient_baseline' => $insufficientBaseline,
             'summary' => [
-                'primaryCause' => $highestScore >= 30 ? $primaryCause : 'None / Idle',
+                'primaryCause' => $causeLabel,
                 'confidence' => $confidence,
                 'evidence' => $evidence,
             ],
