@@ -9,30 +9,17 @@ use App\Services\Monitoring\DTO\DiskMetricData;
 class DiskMetricRecorder
 {
     public function record(
-
         MonitoredServer $server,
-
         DiskMetricData $metric,
-
-    ): void{
-
+    ): void {
         DiskMetric::create([
-
-            'server_id'=>$server->id,
-
-            'hostname'=>$server->system_hostname,
-
-            'total'=>$metric->total,
-
-            'used'=>$metric->used,
-
-            'available'=>$metric->available,
-
-            'usage_percent'=>$metric->usagePercent,
-
-            'collected_at'=>now(),
-
+            'server_id' => $server->id,
+            'hostname' => $server->system_hostname,
+            'total' => $metric->total,
+            'used' => $metric->used,
+            'available' => $metric->available,
+            'usage_percent' => $metric->usagePercent,
+            'collected_at' => now(),
         ]);
-
     }
 }

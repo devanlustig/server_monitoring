@@ -36,3 +36,7 @@ Route::get('/servers/{server}/cpu-analysis', [\App\Http\Controllers\Api\CpuAnaly
 Route::get('/servers/{server}/apache/history',[ApacheController::class, 'history'])->name('servers.apache.history');
 Route::get('/servers/{server}/apache/request-analysis', [ApacheController::class, 'requestAnalysis'])->name('servers.apache.request-analysis');
 Route::get('/servers/{server}/nginx/request-analysis', [NginxController::class, 'requestAnalysis'])->name('servers.nginx.request-analysis');
+
+// Disk Storage Growth Detail Routes
+Route::get('/servers/{server}/disk/growth-detail', [\App\Http\Controllers\DiskGrowthDetailController::class, 'getDirectories'])->name('servers.disk.growth-detail');
+Route::get('/servers/{server}/disk/growth-detail/files', [\App\Http\Controllers\DiskGrowthDetailController::class, 'getFiles'])->name('servers.disk.growth-detail-files');

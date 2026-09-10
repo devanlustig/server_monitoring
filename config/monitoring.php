@@ -9,6 +9,7 @@ return [
         \App\Services\Monitoring\NginxSnapshotProvider::class,
         \App\Services\Monitoring\PostgreSqlSnapshotProvider::class,
         \App\Services\Monitoring\SystemProcessSnapshotProvider::class,
+        \App\Services\Monitoring\DiskFilesystemSnapshotProvider::class,
     ],
     'thresholds' => [
         'slow_request_ms' => 3000,

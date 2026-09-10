@@ -7,6 +7,7 @@ use App\Models\MonitoredServer;
 use App\Services\Monitoring\Connections\ServerConnectionFactory;
 use App\Services\Monitoring\ServerInformationService;
 use App\Services\Monitoring\ServerStatusService;
+use App\Services\Monitoring\DiskStorageGrowthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Validation\ValidationException;
@@ -18,6 +19,7 @@ class MonitoredServerController extends Controller
         private readonly ServerConnectionFactory $connections,
         private readonly ServerInformationService $serverInformation,
         private readonly ServerStatusService $serverStatus,
+        private readonly DiskStorageGrowthService $diskGrowthService,
     ) {}
 
     public function index(): View
@@ -41,8 +43,9 @@ class MonitoredServerController extends Controller
 
     public function show(MonitoredServer $server): View
     {
-        return view('servers.show', [
+        $dailyGrowth = $this->diskGrowthService->getDailyGrowth($server, 5);
 
+        return view('servers.show', [
             'server' => $server,
 
             'latestMetric' => $server
@@ -60,6 +63,7 @@ class MonitoredServerController extends Controller
                 ->latest('collected_at')
                 ->first(),
 
+            'dailyGrowth' => $dailyGrowth,
         ]);
     }
 
@@ -104,11 +108,11 @@ class MonitoredServerController extends Controller
 
     private function ensureConnection(MonitoredServer $server): void
     {
-        $result=$this->connections->for($server)->test($server);
-        if(!$result->successful){
-            $this->serverStatus->offline($server,$result->message??'SSH connection failed.');
+        $result = $this->connections->for($server)->test($server);
+        if (!$result->successful) {
+            $this->serverStatus->offline($server, $result->message ?? 'SSH connection failed.');
             throw ValidationException::withMessages([
-                'ssh_username'=>$result->message,
+                'ssh_username' => $result->message,
             ]);
         }
 
@@ -120,7 +124,7 @@ class MonitoredServerController extends Controller
 
     private function payload(ServerRequest $request, ?MonitoredServer $existing = null): array
     {
-        $data = $request->safe()->only(['name', 'hostname', 'ssh_port','postgres_port', 'ssh_username', 'ssh_password', 'environment', 'description']);
+        $data = $request->safe()->only(['name', 'hostname', 'ssh_port', 'postgres_port', 'ssh_username', 'ssh_password', 'environment', 'description']);
         $data['authentication_method'] = 'ssh_password';
         $data['is_active'] = $request->boolean('is_active');
 
@@ -151,35 +155,36 @@ class MonitoredServerController extends Controller
 
     public function refresh(MonitoredServer $server): JsonResponse
     {
-        try{
+        try {
             $server->update($this->serverInformation->collect($server));
             $this->serverStatus->online($server);
             $server->refresh();
-        }catch(\Throwable $e){
-            $this->serverStatus->offline($server,$e->getMessage());
+        } catch (\Throwable $e) {
+            $this->serverStatus->offline($server, $e->getMessage());
             throw $e;
         }
 
-        $latestMetric=$server->cpuMetrics()->latest('collected_at')->first();
-        $latestMemory=$server->memoryMetrics()->latest('collected_at')->first();
-        $latestDisk=$server->diskMetrics()->latest('collected_at')->first();
+        $latestMetric = $server->cpuMetrics()->latest('collected_at')->first();
+        $latestMemory = $server->memoryMetrics()->latest('collected_at')->first();
+        $latestDisk = $server->diskMetrics()->latest('collected_at')->first();
+        $dailyGrowth = $this->diskGrowthService->getDailyGrowth($server, 5);
 
-        $cpuHistory=$server->cpuMetrics()->latest('collected_at')->limit(20)->get()->reverse();
-        $chartLabels=$cpuHistory->map(fn($m)=>$m->collected_at->format('H:i:s'))->values();
-        $chartData=$cpuHistory->map(fn($m)=>[
+        $cpuHistory = $server->cpuMetrics()->latest('collected_at')->limit(20)->get()->reverse();
+        $chartLabels = $cpuHistory->map(fn ($m) => $m->collected_at->format('H:i:s'))->values();
+        $chartData = $cpuHistory->map(fn ($m) => [
             'y' => (float)$m->usage_percent,
             'timestamp' => $m->collected_at->toDateTimeString()
         ])->values();
 
         return response()->json([
-            'header'=>view('servers.partials.header',compact('server','latestMetric','latestMemory','latestDisk'))->render(),
-            'system_information'=>view('servers.partials.system-information',compact('server'))->render(),
-            'cpu_detail'=>view('servers.partials.cpu-detail',compact('server','latestMetric'))->render(),
-            'memory_detail'=>view('servers.partials.memory-detail',compact('server','latestMemory'))->render(),
-            'disk_detail'=>view('servers.partials.disk-detail',compact('server','latestDisk'))->render(),
-            'cpu_chart'=>view('servers.partials.cpu-chart',compact('server'))->render(),
-            'chart_labels'=>$chartLabels,
-            'chart_data'=>$chartData,
+            'header' => view('servers.partials.header', compact('server', 'latestMetric', 'latestMemory', 'latestDisk'))->render(),
+            'system_information' => view('servers.partials.system-information', compact('server'))->render(),
+            'cpu_detail' => view('servers.partials.cpu-detail', compact('server', 'latestMetric'))->render(),
+            'memory_detail' => view('servers.partials.memory-detail', compact('server', 'latestMemory'))->render(),
+            'disk_detail' => view('servers.partials.disk-detail', compact('server', 'latestDisk', 'dailyGrowth'))->render(),
+            'cpu_chart' => view('servers.partials.cpu-chart', compact('server'))->render(),
+            'chart_labels' => $chartLabels,
+            'chart_data' => $chartData,
         ]);
     }
 }
