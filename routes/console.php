@@ -22,3 +22,7 @@ Schedule::command('monitor:run')
 Schedule::command('monitor:snapshot')
     ->everyTwoMinutes();
 
+Schedule::command('monitoring:cleanup')
+    ->dailyAt('01:00')
+    ->withoutOverlapping();
+
