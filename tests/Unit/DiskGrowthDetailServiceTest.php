@@ -115,6 +115,86 @@ class DiskGrowthDetailServiceTest extends TestCase
         $this->assertEquals('N/A', $result['files'][0]['growthFormatted']);
     }
 
+    public function test_file_growth_when_directory_growth_large_and_file_at_depth_greater_than_3()
+    {
+        $prevDate = Carbon::parse('2026-09-09 12:00:00');
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        $deepFilePath = '/var/lib/postgresql/16/main/base/16384/24581';
+        $deepDirDir = dirname($deepFilePath); // /var/lib/postgresql/16/main/base/16384
+
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $deepDirDir, 'file_path' => $deepFilePath, 'size_bytes' => 100000000, 'snapshot_at' => $prevDate]);
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $deepDirDir, 'file_path' => $deepFilePath, 'size_bytes' => 522100000, 'snapshot_at' => $targetDate]);
+
+        $result = $this->service->getFileGrowth($this->server, '2026-09-10', $directory);
+
+        $this->assertNotEmpty($result['files']);
+        $this->assertEquals('24581', $result['files'][0]['filename']);
+        $this->assertEquals($deepFilePath, $result['files'][0]['path']);
+        $this->assertEquals(100000000, $result['files'][0]['previousSizeBytes']);
+        $this->assertEquals(422100000, $result['files'][0]['growthBytes']);
+    }
+
+    public function test_new_file_with_existing_previous_snapshot_returns_zero_previous_size_and_current_size_growth()
+    {
+        $prevDate = Carbon::parse('2026-09-09 12:00:00');
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        // Existing file in previous snapshot
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/existing.db', 'size_bytes' => 10000000, 'snapshot_at' => $prevDate]);
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/existing.db', 'size_bytes' => 10000000, 'snapshot_at' => $targetDate]);
+
+        // Brand new file created on target date
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => '/var/lib/postgresql/16/main/pg_wal', 'file_path' => '/var/lib/postgresql/16/main/pg_wal/000000010000000000000001', 'size_bytes' => 400000000, 'snapshot_at' => $targetDate]);
+
+        $result = $this->service->getFileGrowth($this->server, '2026-09-10', $directory);
+
+        $this->assertNotEmpty($result['files']);
+        // Top file should be the brand new file with highest growth (400 MB)
+        $newFile = $result['files'][0];
+        $this->assertEquals('000000010000000000000001', $newFile['filename']);
+        $this->assertEquals(0, $newFile['previousSizeBytes']);
+        $this->assertEquals('0 B', $newFile['previousSizeFormatted']);
+        $this->assertEquals(400000000, $newFile['growthBytes']);
+    }
+
+    public function test_existing_file_growth()
+    {
+        $prevDate = Carbon::parse('2026-09-09 12:00:00');
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/app.db', 'size_bytes' => 100000000, 'snapshot_at' => $prevDate]);
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/app.db', 'size_bytes' => 250000000, 'snapshot_at' => $targetDate]);
+
+        $result = $this->service->getFileGrowth($this->server, '2026-09-10', $directory);
+
+        $this->assertNotEmpty($result['files']);
+        $this->assertEquals('app.db', $result['files'][0]['filename']);
+        $this->assertEquals(100000000, $result['files'][0]['previousSizeBytes']);
+        $this->assertEquals(150000000, $result['files'][0]['growthBytes']);
+    }
+
+    public function test_directory_without_growth()
+    {
+        $prevDate = Carbon::parse('2026-09-09 12:00:00');
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/static.db', 'size_bytes' => 50000000, 'snapshot_at' => $prevDate]);
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/static.db', 'size_bytes' => 50000000, 'snapshot_at' => $targetDate]);
+
+        $result = $this->service->getFileGrowth($this->server, '2026-09-10', $directory);
+
+        $this->assertNotEmpty($result['files']);
+        $this->assertEquals('static.db', $result['files'][0]['filename']);
+        $this->assertEquals(50000000, $result['files'][0]['previousSizeBytes']);
+        $this->assertEquals(0, $result['files'][0]['growthBytes']);
+        $this->assertEquals('0 GB', $result['files'][0]['growthFormatted']);
+    }
+
     public function test_non_overlapping_paths_filter_prevents_double_counting()
     {
         $paths = [

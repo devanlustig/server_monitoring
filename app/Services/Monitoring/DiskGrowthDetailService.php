@@ -148,19 +148,28 @@ class DiskGrowthDetailService
     /**
      * Get file storage growth contributors in a specific directory.
      */
+    /**
+     * Get file storage growth contributors in a specific directory.
+     */
     public function getFileGrowth(MonitoredServer $server, string $date, string $directory): array
     {
         $directory = $this->sanitizeDirectoryPath($directory);
         $targetDate = Carbon::parse($date)->format('Y-m-d');
+        $dirPrefix = rtrim($directory, '/') . '/';
 
-        // Fetch file snapshots for target date
+        // Fetch file snapshots for target date that belong to the subtree of $directory
         $targetSnapshots = DiskFileSnapshot::where('server_id', $server->id)
-            ->where('directory_path', $directory)
             ->whereDate('snapshot_at', $targetDate)
+            ->where(function ($query) use ($directory, $dirPrefix) {
+                $query->where('file_path', 'like', $dirPrefix . '%')
+                      ->orWhere('file_path', '=', $directory)
+                      ->orWhere('directory_path', '=', $directory)
+                      ->orWhere('directory_path', 'like', $dirPrefix . '%');
+            })
             ->orderBy('snapshot_at', 'desc')
             ->get();
 
-        // If no file snapshot stored, execute lightweight SSH command for selected directory
+        // If no file snapshot stored for this subtree, execute SSH command for selected directory
         if ($targetSnapshots->isEmpty()) {
             $targetFilesMap = $this->fetchLiveFilesForDirectory($server, $directory);
             $prevFilesMap = collect();
@@ -169,17 +178,29 @@ class DiskGrowthDetailService
             $latestTargetAt = $targetSnapshots->first()->snapshot_at;
             $targetFilesMap = $targetSnapshots->where('snapshot_at', $latestTargetAt)->keyBy('file_path');
 
+            // Find previous snapshot timestamp for this server prior to target date
             $prevSnapshotAt = DiskFileSnapshot::where('server_id', $server->id)
-                ->where('directory_path', $directory)
                 ->where('snapshot_at', '<', $latestTargetAt->copy()->startOfDay())
                 ->orderBy('snapshot_at', 'desc')
                 ->value('snapshot_at');
 
+            if (!$prevSnapshotAt) {
+                $prevSnapshotAt = DiskFileSnapshot::where('server_id', $server->id)
+                    ->where('snapshot_at', '<', $latestTargetAt)
+                    ->orderBy('snapshot_at', 'desc')
+                    ->value('snapshot_at');
+            }
+
             $prevFilesMap = collect();
             if ($prevSnapshotAt) {
                 $prevFilesMap = DiskFileSnapshot::where('server_id', $server->id)
-                    ->where('directory_path', $directory)
                     ->where('snapshot_at', $prevSnapshotAt)
+                    ->where(function ($query) use ($directory, $dirPrefix) {
+                        $query->where('file_path', 'like', $dirPrefix . '%')
+                              ->orWhere('file_path', '=', $directory)
+                              ->orWhere('directory_path', '=', $directory)
+                              ->orWhere('directory_path', 'like', $dirPrefix . '%');
+                    })
                     ->get()
                     ->keyBy('file_path');
             }
@@ -190,13 +211,22 @@ class DiskGrowthDetailService
         foreach ($targetFilesMap as $filePath => $item) {
             $currentSize = is_object($item) && isset($item->size_bytes) ? (int) $item->size_bytes : (int) $item;
             
-            if ($prevSnapshotAt && $prevFilesMap->has($filePath)) {
-                $prevItem = $prevFilesMap->get($filePath);
-                $previousSize = is_object($prevItem) && isset($prevItem->size_bytes) ? (int) $prevItem->size_bytes : 0;
-                $growth = $currentSize - $previousSize;
-                $previousSizeFormatted = $this->formatBytes($previousSize);
-                $growthFormatted = $this->growthService->formatGrowth($growth);
+            if ($prevSnapshotAt !== null) {
+                if ($prevFilesMap->has($filePath)) {
+                    $prevItem = $prevFilesMap->get($filePath);
+                    $previousSize = is_object($prevItem) && isset($prevItem->size_bytes) ? (int) $prevItem->size_bytes : 0;
+                    $growth = $currentSize - $previousSize;
+                    $previousSizeFormatted = $this->formatBytes($previousSize);
+                    $growthFormatted = $this->growthService->formatGrowth($growth);
+                } else {
+                    // New file: Previous size = 0 B, Growth Delta = current size
+                    $previousSize = 0;
+                    $growth = $currentSize;
+                    $previousSizeFormatted = '0 B';
+                    $growthFormatted = $this->growthService->formatGrowth($growth);
+                }
             } else {
+                // Previous snapshot is NOT available
                 $previousSize = null;
                 $growth = null;
                 $previousSizeFormatted = 'N/A';
@@ -215,9 +245,12 @@ class DiskGrowthDetailService
             );
         }
 
-        // Sort by growthBytes DESC (put nulls at end, sorted by currentSizeBytes)
+        // Sort by growthBytes DESC; if growth is null ('N/A'), fallback to currentSizeBytes DESC
         usort($fileResults, function ($a, $b) {
             if ($a->growthBytes !== null && $b->growthBytes !== null) {
+                if ($a->growthBytes === $b->growthBytes) {
+                    return $b->currentSizeBytes <=> $a->currentSizeBytes;
+                }
                 return $b->growthBytes <=> $a->growthBytes;
             }
             if ($a->growthBytes !== null) return -1;
@@ -294,7 +327,8 @@ class DiskGrowthDetailService
     {
         $resultMap = collect();
         try {
-            $cmd = 'find ' . escapeshellarg($directory) . ' -maxdepth 3 -type f -printf "%s %p\n" 2>/dev/null | sort -rn | head -15';
+            $depth = (str_contains($directory, 'postgresql') || str_contains($directory, 'mysql')) ? 8 : 6;
+            $cmd = 'find ' . escapeshellarg($directory) . ' -maxdepth ' . $depth . ' -type f -printf "%s %p\n" 2>/dev/null | sort -rn | head -30';
             $result = $this->commands->execute($server, $cmd);
 
             if ($result->successful && !empty($result->output)) {
@@ -304,7 +338,7 @@ class DiskGrowthDetailService
                     if (preg_match('/^(\d+)\s+(.+)$/', $line, $m)) {
                         $bytes = (int) $m[1];
                         $filePath = trim($m[2]);
-                        $resultMap->put($filePath, (object) ['size_bytes' => $bytes]);
+                        $resultMap->put($filePath, (object) ['size_bytes' => $bytes, 'file_path' => $filePath]);
                     }
                 }
             }

@@ -46,16 +46,24 @@ class DiskFilesystemCollector
 
         // 2. Collect Top File Sizes
         try {
-            $fileCmd = 'find /var/lib /var/log /var/www /home /tmp -maxdepth 3 -type f -printf "%s %p\n" 2>/dev/null | sort -rn | head -30';
+            $fileCmd = '(find /var/lib/postgresql /var/lib/mysql -maxdepth 8 -type f -printf "%s %p\n" 2>/dev/null; find /var/lib /var/log /var/www /home /tmp /opt /srv -maxdepth 5 -type f -printf "%s %p\n" 2>/dev/null) | sort -rn | head -150';
             $fileResult = $this->commands->execute($server, $fileCmd);
 
             if ($fileResult->successful && !empty($fileResult->output)) {
                 $lines = explode("\n", trim($fileResult->output));
+                $seenFiles = [];
+
                 foreach ($lines as $line) {
                     $line = trim($line);
                     if (preg_match('/^(\d+)\s+(.+)$/', $line, $m)) {
                         $bytes = (int) $m[1];
                         $filePath = trim($m[2]);
+
+                        if (isset($seenFiles[$filePath])) {
+                            continue;
+                        }
+                        $seenFiles[$filePath] = true;
+
                         $dirPath = dirname($filePath);
 
                         DiskFileSnapshot::create([
