@@ -2,10 +2,10 @@
 
 namespace App\Services\Monitoring;
 
-use App\Models\DiskMetric;
 use App\Models\MonitoredServer;
 use App\Services\Monitoring\DTO\DailyStorageGrowthData;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class DiskStorageGrowthService
 {
@@ -18,42 +18,40 @@ class DiskStorageGrowthService
      */
     public function getDailyGrowth(MonitoredServer $server, int $days = 5): array
     {
-        $rawMetrics = DiskMetric::where('server_id', $server->id)
+        // 1. Group by calendar date in database and get max(collected_at) per date
+        $latestPerDateSub = DB::table('disk_metrics')
+            ->where('server_id', $server->id)
             ->whereNotNull('used')
-            ->orderBy('collected_at', 'desc')
+            ->selectRaw("DATE(collected_at) as snapshot_date, MAX(collected_at) as max_collected_at")
+            ->groupByRaw("DATE(collected_at)");
+
+        // 2. Join back to get the latest snapshot row per date, limit to ($days + 1)
+        $dailyMetrics = DB::table('disk_metrics as m')
+            ->joinSub($latestPerDateSub, 'latest', function ($join) use ($server) {
+                $join->on('m.collected_at', '=', 'latest.max_collected_at')
+                     ->where('m.server_id', '=', $server->id);
+            })
+            ->where('m.server_id', $server->id)
+            ->whereNotNull('m.used')
+            ->select(['latest.snapshot_date as date', 'm.used', 'm.collected_at'])
+            ->orderBy('m.collected_at', 'desc')
+            ->limit($days + 1)
             ->get();
 
-        if ($rawMetrics->isEmpty()) {
-            return [];
-        }
-
-        $dailySnapshots = [];
-        foreach ($rawMetrics as $metric) {
-            if (!$metric->collected_at) {
-                continue;
-            }
-            $date = $metric->collected_at->format('Y-m-d');
-            if (!isset($dailySnapshots[$date])) {
-                $dailySnapshots[$date] = $metric;
-            }
-        }
-
-        $dates = array_keys($dailySnapshots);
-        if (empty($dates)) {
+        if ($dailyMetrics->isEmpty()) {
             return [];
         }
 
         $result = [];
-        $targetCount = min($days, count($dates));
+        $targetCount = min($days, count($dailyMetrics));
 
         for ($i = 0; $i < $targetCount; $i++) {
-            $currentDate = $dates[$i];
-            $currentMetric = $dailySnapshots[$currentDate];
+            $currentMetric = $dailyMetrics[$i];
+            $currentDate = (string) $currentMetric->date;
             $currentUsed = (float) $currentMetric->used;
 
-            if (isset($dates[$i + 1])) {
-                $prevDate = $dates[$i + 1];
-                $prevMetric = $dailySnapshots[$prevDate];
+            if (isset($dailyMetrics[$i + 1])) {
+                $prevMetric = $dailyMetrics[$i + 1];
                 $prevUsed = (float) $prevMetric->used;
                 $growthBytes = $currentUsed - $prevUsed;
             } else {

@@ -8,6 +8,7 @@ use App\Models\DiskMetric;
 use App\Services\Monitoring\DiskStorageGrowthService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 class DiskStorageGrowthServiceTest extends TestCase
 {
@@ -293,5 +294,47 @@ class DiskStorageGrowthServiceTest extends TestCase
         // Growth must be positive 10 GB based on used bytes, ignoring usage_percent drop
         $this->assertEquals(10000000000, $result[0]->growthBytes);
         $this->assertStringStartsWith('+', $result[0]->growthFormatted);
+    }
+
+    public function test_large_dataset_daily_growth_memory_efficiency()
+    {
+        $baseDate = Carbon::parse('2026-09-10 12:00:00');
+
+        // Insert 10,080 disk metric rows collected every minute across 7 days
+        $rows = [];
+        for ($i = 0; $i < 7; $i++) {
+            $dayDate = $baseDate->copy()->subDays($i);
+            for ($m = 0; $m < 1440; $m++) {
+                $collectedAt = $dayDate->copy()->subMinutes($m);
+                $rows[] = [
+                    'server_id' => $this->server->id,
+                    'hostname' => 'mutif',
+                    'total' => 200000000000,
+                    'used' => 100000000000 + ((6 - $i) * 1000000000) + ($m * 100),
+                    'available' => 100000000000,
+                    'usage_percent' => 50.0,
+                    'collected_at' => $collectedAt->toDateTimeString(),
+                ];
+            }
+        }
+
+        foreach (array_chunk($rows, 1000) as $chunk) {
+            DB::table('disk_metrics')->insert($chunk);
+        }
+
+        $startMemory = memory_get_usage();
+
+        $result = $this->service->getDailyGrowth($this->server, 5);
+
+        $endMemory = memory_get_usage();
+        $memoryDelta = $endMemory - $startMemory;
+
+        // Daily growth result count must be exactly 5
+        $this->assertCount(5, $result);
+        $this->assertEquals('2026-09-10', $result[0]->date);
+        $this->assertEquals('2026-09-06', $result[4]->date);
+
+        // Memory delta must be minimal (< 2 MB) because database groups by date and returns max ($days + 1) rows
+        $this->assertLessThan(2 * 1024 * 1024, $memoryDelta);
     }
 }
