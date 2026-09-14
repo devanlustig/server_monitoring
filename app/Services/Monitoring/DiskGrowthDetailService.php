@@ -269,6 +269,9 @@ class DiskGrowthDetailService
             ->limit(15)
             ->get();
 
+        $filePaths = $rows->pluck('file_path')->toArray();
+        $oidMap = $this->fetchPostgresDatabaseOidMap($server, $filePaths);
+
         $fileResults = [];
         foreach ($rows as $row) {
             $currentSize = (int) $row->current_size_bytes;
@@ -277,6 +280,7 @@ class DiskGrowthDetailService
 
             $previousSizeFormatted = $previousSize !== null ? $this->formatBytes($previousSize) : 'N/A';
             $growthFormatted = $growth !== null ? $this->growthService->formatGrowth($growth) : 'N/A';
+            $databaseName = $this->extractPostgresDatabaseName($row->file_path, $oidMap);
 
             $fileResults[] = new StorageGrowthFileData(
                 path: $row->file_path,
@@ -286,7 +290,8 @@ class DiskGrowthDetailService
                 growthBytes: $growth,
                 currentSizeFormatted: $this->formatBytes($currentSize),
                 previousSizeFormatted: $previousSizeFormatted,
-                growthFormatted: $growthFormatted
+                growthFormatted: $growthFormatted,
+                databaseName: $databaseName
             );
         }
 
@@ -299,9 +304,13 @@ class DiskGrowthDetailService
 
     private function formatLiveFilesResult(MonitoredServer $server, string $directory, string $targetDate, \Illuminate\Support\Collection $targetFilesMap): array
     {
+        $filePaths = $targetFilesMap->keys()->take(15)->toArray();
+        $oidMap = $this->fetchPostgresDatabaseOidMap($server, $filePaths);
+
         $fileResults = [];
-        foreach ($targetFilesMap as $filePath => $item) {
+        foreach ($targetFilesMap->take(15) as $filePath => $item) {
             $currentSize = is_object($item) && isset($item->size_bytes) ? (int) $item->size_bytes : (int) $item;
+            $databaseName = $this->extractPostgresDatabaseName($filePath, $oidMap);
             $fileResults[] = new StorageGrowthFileData(
                 path: $filePath,
                 filename: basename($filePath),
@@ -310,14 +319,69 @@ class DiskGrowthDetailService
                 growthBytes: null,
                 currentSizeFormatted: $this->formatBytes($currentSize),
                 previousSizeFormatted: 'N/A',
-                growthFormatted: 'N/A'
+                growthFormatted: 'N/A',
+                databaseName: $databaseName
             );
         }
         return [
             'directory' => $directory,
             'date' => $targetDate,
-            'files' => array_map(fn($f) => $f->toArray(), array_slice($fileResults, 0, 15)),
+            'files' => array_map(fn($f) => $f->toArray(), $fileResults),
         ];
+    }
+
+    /**
+     * Extract PostgreSQL database OIDs from a list of file paths and fetch DB names via SSH.
+     *
+     * @param MonitoredServer $server
+     * @param array $filePaths
+     * @return array Map of [oid_string => database_name]
+     */
+    public function fetchPostgresDatabaseOidMap(MonitoredServer $server, array $filePaths): array
+    {
+        $oids = [];
+        foreach ($filePaths as $path) {
+            if (preg_match('/\/var\/lib\/postgresql\/(?:[^\/]+\/)+base\/(\d+)(?:\/|$)/', $path, $m)) {
+                $oids[$m[1]] = true;
+            }
+        }
+
+        if (empty($oids)) {
+            return [];
+        }
+
+        $oidMap = [];
+        try {
+            $cmd = "sudo -u postgres psql -t -A -F ',' -c \"SELECT oid, datname FROM pg_database;\" 2>/dev/null";
+            $result = $this->commands->execute($server, $cmd);
+
+            if ($result->successful && !empty($result->output)) {
+                $lines = explode("\n", trim($result->output));
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (preg_match('/^(\d+),(.*)$/', $line, $m)) {
+                        $oidMap[$m[1]] = trim($m[2]);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            logger()->warning("Failed to fetch PostgreSQL database OID map: " . $e->getMessage());
+        }
+
+        return $oidMap;
+    }
+
+    /**
+     * Extract database name for a PostgreSQL file path if OID match exists.
+     */
+    public function extractPostgresDatabaseName(string $path, array $oidMap): ?string
+    {
+        if (preg_match('/\/var\/lib\/postgresql\/(?:[^\/]+\/)+base\/(\d+)(?:\/|$)/', $path, $m)) {
+            $oid = $m[1];
+            return $oidMap[$oid] ?? 'Unknown';
+        }
+
+        return null;
     }
 
     /**

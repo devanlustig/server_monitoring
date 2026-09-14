@@ -215,6 +215,7 @@
                             <td>
                                 <div class="fw-semibold text-dark text-break">${f.filename}</div>
                                 <div class="text-muted small text-truncate" style="max-width: 380px;" title="${escapeHtml(f.path)}">${f.path}</div>
+                                ${f.database_name ? `<div class="text-muted small mt-1"><i class="bi bi-database me-1"></i>Database: ${escapeHtml(f.database_name)}</div>` : ''}
                             </td>
                             <td class="text-end text-muted small">${f.currentSizeFormatted}</td>
                             <td class="text-end text-muted small">${prevSizeHtml}</td>

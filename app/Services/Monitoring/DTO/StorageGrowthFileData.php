@@ -13,6 +13,7 @@ class StorageGrowthFileData
         public readonly string $currentSizeFormatted,
         public readonly string $previousSizeFormatted,
         public readonly string $growthFormatted,
+        public readonly ?string $databaseName = null,
     ) {}
 
     public function toArray(): array
@@ -26,6 +27,7 @@ class StorageGrowthFileData
             'currentSizeFormatted' => $this->currentSizeFormatted,
             'previousSizeFormatted' => $this->previousSizeFormatted,
             'growthFormatted' => $this->growthFormatted,
+            'database_name' => $this->databaseName,
         ];
     }
 }
