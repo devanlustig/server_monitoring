@@ -312,4 +312,44 @@ class DiskGrowthDetailServiceTest extends TestCase
         $this->assertEquals('rel_5000', $result['files'][0]['filename']);
         $this->assertEquals(2500000, $result['files'][0]['growthBytes']);
     }
+
+    public function test_large_dataset_directory_growth_memory_efficiency()
+    {
+        $baseDate = Carbon::parse('2026-09-10 12:00:00');
+        $paths = ['/var', '/var/lib', '/var/lib/postgresql', '/var/log', '/var/www', '/home', '/tmp', '/opt', '/etc', '/srv'];
+
+        // Insert directory snapshots every 2 minutes across 3 days (720 runs/day * 10 paths = 7,200 rows/day * 3 = 21,600 rows!)
+        $rows = [];
+        for ($day = 0; $day < 3; $day++) {
+            $dayDate = $baseDate->copy()->subDays($day);
+            for ($run = 0; $run < 720; $run++) {
+                $snapshotAt = $dayDate->copy()->subMinutes($run * 2);
+                foreach ($paths as $idx => $path) {
+                    $rows[] = [
+                        'server_id' => $this->server->id,
+                        'path' => $path,
+                        'size_bytes' => 1000000000 + ((2 - $day) * 100000000) + ($idx * 5000000),
+                        'snapshot_at' => $snapshotAt->toDateTimeString(),
+                    ];
+                }
+            }
+        }
+
+        foreach (array_chunk($rows, 1000) as $chunk) {
+            DB::table('disk_directory_snapshots')->insert($chunk);
+        }
+
+        $startMemory = memory_get_usage();
+
+        $result = $this->service->getDirectoryGrowth($this->server, '2026-09-10');
+
+        $endMemory = memory_get_usage();
+        $memoryDelta = $endMemory - $startMemory;
+
+        $this->assertNotEmpty($result['directories']);
+        // Memory delta must be minimal (< 3 MB) because only single timestamp rows are fetched
+        $this->assertLessThan(3 * 1024 * 1024, $memoryDelta);
+        // Correct leaf paths selected
+        $this->assertEquals('/srv', $result['directories'][0]['path']);
+    }
 }

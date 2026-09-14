@@ -23,6 +23,9 @@ class DiskGrowthDetailService
     /**
      * Get directory storage growth contributors for a server on a specific date.
      */
+    /**
+     * Get directory storage growth contributors for a server on a specific date.
+     */
     public function getDirectoryGrowth(MonitoredServer $server, string $date): array
     {
         $targetDate = Carbon::parse($date)->format('Y-m-d');
@@ -40,13 +43,13 @@ class DiskGrowthDetailService
             }
         }
 
-        // Get directory snapshots for target date
-        $targetSnapshots = DiskDirectorySnapshot::where('server_id', $server->id)
+        // 1. Lightweight lookup for latest target snapshot timestamp on target date
+        $latestTargetAt = DB::table('disk_directory_snapshots')
+            ->where('server_id', $server->id)
             ->whereDate('snapshot_at', $targetDate)
-            ->orderBy('snapshot_at', 'desc')
-            ->get();
+            ->max('snapshot_at');
 
-        if ($targetSnapshots->isEmpty()) {
+        if (!$latestTargetAt) {
             return [
                 'date' => $targetDate,
                 'dateFormatted' => $dateFormatted,
@@ -56,49 +59,65 @@ class DiskGrowthDetailService
             ];
         }
 
-        // Latest snapshot_at timestamp on target date
-        $latestTargetAt = $targetSnapshots->first()->snapshot_at;
-        $targetDirs = $targetSnapshots->where('snapshot_at', $latestTargetAt)->keyBy('path');
+        // 2. Lightweight lookup for preceding date snapshot timestamp
+        $latestTargetCarbon = Carbon::parse($latestTargetAt);
+        $prevSnapshotAt = DB::table('disk_directory_snapshots')
+            ->where('server_id', $server->id)
+            ->where('snapshot_at', '<', $latestTargetCarbon->copy()->startOfDay())
+            ->max('snapshot_at');
 
-        // Find preceding date snapshot timestamp
-        $prevSnapshotAt = DiskDirectorySnapshot::where('server_id', $server->id)
-            ->where('snapshot_at', '<', $latestTargetAt->copy()->startOfDay())
-            ->orderBy('snapshot_at', 'desc')
-            ->value('snapshot_at');
-
-        $prevDirs = collect();
-        if ($prevSnapshotAt) {
-            $prevDirs = DiskDirectorySnapshot::where('server_id', $server->id)
-                ->where('snapshot_at', $prevSnapshotAt)
-                ->get()
-                ->keyBy('path');
+        if (!$prevSnapshotAt) {
+            $prevSnapshotAt = DB::table('disk_directory_snapshots')
+                ->where('server_id', $server->id)
+                ->where('snapshot_at', '<', $latestTargetAt)
+                ->max('snapshot_at');
         }
 
-        // Filter non-overlapping directories to prevent double-counting
-        $allPaths = $targetDirs->keys()->toArray();
-        $leafPaths = $this->filterNonOverlappingPaths($allPaths);
+        // 3. Database JOIN for ONLY the single latest snapshot timestamp vs previous snapshot timestamp
+        $query = DB::table('disk_directory_snapshots as cur')
+            ->where('cur.server_id', $server->id)
+            ->where('cur.snapshot_at', $latestTargetAt);
+
+        if ($prevSnapshotAt) {
+            $query->leftJoin('disk_directory_snapshots as prev', function ($join) use ($server, $prevSnapshotAt) {
+                $join->on('prev.path', '=', 'cur.path')
+                     ->where('prev.server_id', '=', $server->id)
+                     ->where('prev.snapshot_at', '=', $prevSnapshotAt);
+            });
+
+            $prevSizeSql = "CASE WHEN prev.size_bytes IS NOT NULL THEN prev.size_bytes ELSE NULL END";
+            $growthSql = "CASE WHEN prev.size_bytes IS NOT NULL THEN (cur.size_bytes - prev.size_bytes) ELSE NULL END";
+        } else {
+            $prevSizeSql = "NULL";
+            $growthSql = "NULL";
+        }
+
+        $rawDirs = $query->select([
+            'cur.path',
+            'cur.size_bytes as current_size_bytes',
+            DB::raw("{$prevSizeSql} as previous_size_bytes"),
+            DB::raw("{$growthSql} as growth_bytes"),
+        ])->get();
+
+        // 4. Filter non-overlapping directories to prevent double-counting
+        $allPaths = $rawDirs->pluck('path')->toArray();
+        $leafPathsSet = array_flip($this->filterNonOverlappingPaths($allPaths));
 
         $directoryResults = [];
-        $sumDirectoriesGrowth = 0;
-
-        foreach ($leafPaths as $path) {
-            $currentSize = (int) ($targetDirs->get($path)?->size_bytes ?? 0);
-            
-            if ($prevSnapshotAt && $prevDirs->has($path)) {
-                $previousSize = (int) $prevDirs->get($path)->size_bytes;
-                $growth = $currentSize - $previousSize;
-                $previousSizeFormatted = $this->formatBytes($previousSize);
-                $growthFormatted = $this->growthService->formatGrowth($growth);
-                $sumDirectoriesGrowth += max(0, $growth);
-            } else {
-                $previousSize = null;
-                $growth = null;
-                $previousSizeFormatted = 'N/A';
-                $growthFormatted = 'N/A';
+        foreach ($rawDirs as $row) {
+            if (!isset($leafPathsSet[$row->path])) {
+                continue;
             }
 
+            $currentSize = (int) $row->current_size_bytes;
+            $previousSize = $row->previous_size_bytes !== null ? (int) $row->previous_size_bytes : null;
+            $growth = $row->growth_bytes !== null ? (int) $row->growth_bytes : null;
+
+            $previousSizeFormatted = $previousSize !== null ? $this->formatBytes($previousSize) : 'N/A';
+            $growthFormatted = $growth !== null ? $this->growthService->formatGrowth($growth) : 'N/A';
+
             $directoryResults[] = new StorageGrowthDirectoryData(
-                path: $path,
+                path: $row->path,
                 currentSizeBytes: $currentSize,
                 previousSizeBytes: $previousSize,
                 growthBytes: $growth,
@@ -111,6 +130,9 @@ class DiskGrowthDetailService
         // Sort by growthBytes DESC (put nulls at the end, sorted by currentSizeBytes)
         usort($directoryResults, function ($a, $b) {
             if ($a->growthBytes !== null && $b->growthBytes !== null) {
+                if ($a->growthBytes === $b->growthBytes) {
+                    return $b->currentSizeBytes <=> $a->currentSizeBytes;
+                }
                 return $b->growthBytes <=> $a->growthBytes;
             }
             if ($a->growthBytes !== null) return -1;
