@@ -219,11 +219,19 @@ class DiskGrowthDetailService
                     $previousSizeFormatted = $this->formatBytes($previousSize);
                     $growthFormatted = $this->growthService->formatGrowth($growth);
                 } else {
-                    // New file: Previous size = 0 B, Growth Delta = current size
-                    $previousSize = 0;
-                    $growth = $currentSize;
-                    $previousSizeFormatted = '0 B';
-                    $growthFormatted = $this->growthService->formatGrowth($growth);
+                    if ($this->isSnapshotCoverageComparable($filePath, $prevFilesMap)) {
+                        // Genuinely new file in a comparable snapshot coverage/depth
+                        $previousSize = 0;
+                        $growth = $currentSize;
+                        $previousSizeFormatted = '0 B';
+                        $growthFormatted = $this->growthService->formatGrowth($growth);
+                    } else {
+                        // File missing because previous snapshot coverage/depth was not comparable
+                        $previousSize = null;
+                        $growth = null;
+                        $previousSizeFormatted = 'N/A';
+                        $growthFormatted = 'N/A';
+                    }
                 }
             } else {
                 // Previous snapshot is NOT available
@@ -347,6 +355,59 @@ class DiskGrowthDetailService
         }
 
         return $resultMap;
+    }
+
+    /**
+     * Determine whether the previous snapshot had comparable depth/coverage for a file path.
+     */
+    public function isSnapshotCoverageComparable(string $filePath, \Illuminate\Support\Collection $prevFilesMap): bool
+    {
+        if ($prevFilesMap->isEmpty()) {
+            return false;
+        }
+
+        $fileDepth = count(explode('/', trim($filePath, '/')));
+        
+        $maxPrevDepth = 0;
+        $prevDirPaths = [];
+
+        foreach ($prevFilesMap as $prevFile) {
+            $path = is_object($prevFile) && isset($prevFile->file_path) ? $prevFile->file_path : (string) $prevFile;
+            if ($path) {
+                $depth = count(explode('/', trim($path, '/')));
+                if ($depth > $maxPrevDepth) {
+                    $maxPrevDepth = $depth;
+                }
+                $dir = is_object($prevFile) && isset($prevFile->directory_path) ? $prevFile->directory_path : dirname($path);
+                $prevDirPaths[$dir] = true;
+            }
+        }
+
+        if ($maxPrevDepth === 0) {
+            return false;
+        }
+
+        // Target file path depth exceeds maximum depth captured in previous snapshot
+        if ($fileDepth > $maxPrevDepth) {
+            return false;
+        }
+
+        // Exact parent directory was covered in previous snapshot
+        $targetDir = dirname($filePath);
+        if (isset($prevDirPaths[$targetDir])) {
+            return true;
+        }
+
+        // Check if any directory in previous snapshot shares the same parent directory depth
+        $targetDirDepth = count(explode('/', trim($targetDir, '/')));
+        foreach (array_keys($prevDirPaths) as $prevDir) {
+            $prevDirDepth = count(explode('/', trim($prevDir, '/')));
+            if ($prevDirDepth >= $targetDirDepth) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function formatBytes(int $bytes): string

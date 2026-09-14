@@ -142,11 +142,11 @@ class DiskGrowthDetailServiceTest extends TestCase
         $targetDate = Carbon::parse('2026-09-10 12:00:00');
         $directory = '/var/lib/postgresql';
 
-        // Existing file in previous snapshot
-        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/existing.db', 'size_bytes' => 10000000, 'snapshot_at' => $prevDate]);
-        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => $directory, 'file_path' => '/var/lib/postgresql/existing.db', 'size_bytes' => 10000000, 'snapshot_at' => $targetDate]);
+        // Existing file in previous snapshot at depth 8
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => '/var/lib/postgresql/16/main/pg_wal', 'file_path' => '/var/lib/postgresql/16/main/pg_wal/000000010000000000000000', 'size_bytes' => 16000000, 'snapshot_at' => $prevDate]);
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => '/var/lib/postgresql/16/main/pg_wal', 'file_path' => '/var/lib/postgresql/16/main/pg_wal/000000010000000000000000', 'size_bytes' => 16000000, 'snapshot_at' => $targetDate]);
 
-        // Brand new file created on target date
+        // Brand new file created on target date at same depth
         DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => '/var/lib/postgresql/16/main/pg_wal', 'file_path' => '/var/lib/postgresql/16/main/pg_wal/000000010000000000000001', 'size_bytes' => 400000000, 'snapshot_at' => $targetDate]);
 
         $result = $this->service->getFileGrowth($this->server, '2026-09-10', $directory);
@@ -158,6 +158,40 @@ class DiskGrowthDetailServiceTest extends TestCase
         $this->assertEquals(0, $newFile['previousSizeBytes']);
         $this->assertEquals('0 B', $newFile['previousSizeFormatted']);
         $this->assertEquals(400000000, $newFile['growthBytes']);
+    }
+
+    public function test_file_missing_in_previous_snapshot_due_to_non_comparable_coverage_returns_null_previous_and_growth()
+    {
+        $prevDate = Carbon::parse('2026-09-13 12:00:00');
+        $targetDate = Carbon::parse('2026-09-14 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        // Previous snapshot (13 Sep) only collected shallow config files (depth <= 6, e.g. /var/lib/postgresql/16/main/postgresql.conf)
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => '/var/lib/postgresql/16/main', 'file_path' => '/var/lib/postgresql/16/main/postgresql.conf', 'size_bytes' => 25000, 'snapshot_at' => $prevDate]);
+
+        // Target snapshot (14 Sep) collected deep relation files at depth 8 (1.0 GB)
+        $deepFilePath = '/var/lib/postgresql/16/main/base/16384/24581';
+        DiskFileSnapshot::create(['server_id' => $this->server->id, 'directory_path' => '/var/lib/postgresql/16/main/base/16384', 'file_path' => $deepFilePath, 'size_bytes' => 1073741824, 'snapshot_at' => $targetDate]);
+
+        $result = $this->service->getFileGrowth($this->server, '2026-09-14', $directory);
+
+        $this->assertNotEmpty($result['files']);
+        
+        $deepFileResult = null;
+        foreach ($result['files'] as $f) {
+            if ($f['path'] === $deepFilePath) {
+                $deepFileResult = $f;
+                break;
+            }
+        }
+
+        $this->assertNotNull($deepFileResult);
+        $this->assertEquals('24581', $deepFileResult['filename']);
+        // Must return NULL for previousSizeBytes and growthBytes, NOT 0 and +1.0 GB!
+        $this->assertNull($deepFileResult['previousSizeBytes']);
+        $this->assertNull($deepFileResult['growthBytes']);
+        $this->assertEquals('N/A', $deepFileResult['previousSizeFormatted']);
+        $this->assertEquals('N/A', $deepFileResult['growthFormatted']);
     }
 
     public function test_existing_file_growth()
