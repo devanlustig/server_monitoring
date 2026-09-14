@@ -11,6 +11,7 @@ use App\Services\Monitoring\DiskStorageGrowthService;
 use App\Services\Monitoring\RemoteCommandService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class DiskGrowthDetailServiceTest extends TestCase
@@ -264,5 +265,51 @@ class DiskGrowthDetailServiceTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
         $this->service->sanitizeDirectoryPath('/proc/sys/fs');
+    }
+
+    public function test_large_production_dataset_memory_efficiency()
+    {
+        $prevDate = Carbon::parse('2026-09-13 12:00:00');
+        $targetDate = Carbon::parse('2026-09-14 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        // Insert 10,000 file snapshot rows in bulk chunks
+        $rows = [];
+        for ($i = 1; $i <= 5000; $i++) {
+            $rows[] = [
+                'server_id' => $this->server->id,
+                'directory_path' => "/var/lib/postgresql/16/main/base/16384",
+                'file_path' => "/var/lib/postgresql/16/main/base/16384/rel_{$i}",
+                'size_bytes' => $i * 1000,
+                'snapshot_at' => $prevDate,
+            ];
+            $rows[] = [
+                'server_id' => $this->server->id,
+                'directory_path' => "/var/lib/postgresql/16/main/base/16384",
+                'file_path' => "/var/lib/postgresql/16/main/base/16384/rel_{$i}",
+                'size_bytes' => ($i * 1000) + ($i * 500),
+                'snapshot_at' => $targetDate,
+            ];
+        }
+
+        foreach (array_chunk($rows, 1000) as $chunk) {
+            DB::table('disk_file_snapshots')->insert($chunk);
+        }
+
+        $startMemory = memory_get_usage();
+
+        $result = $this->service->getFileGrowth($this->server, '2026-09-14', $directory);
+
+        $endMemory = memory_get_usage();
+        $memoryDelta = $endMemory - $startMemory;
+
+        $this->assertNotEmpty($result['files']);
+        // Returns strictly top 15 files
+        $this->assertCount(15, $result['files']);
+        // Memory delta during query execution must be less than 5 MB
+        $this->assertLessThan(5 * 1024 * 1024, $memoryDelta);
+        // Top file is rel_5000 with highest growth (5000 * 500 = 2,500,000 bytes)
+        $this->assertEquals('rel_5000', $result['files'][0]['filename']);
+        $this->assertEquals(2500000, $result['files'][0]['growthBytes']);
     }
 }

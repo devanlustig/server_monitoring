@@ -10,6 +10,7 @@ use App\Services\Monitoring\DTO\StorageGrowthFileData;
 use App\Services\Monitoring\RemoteCommandService;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class DiskGrowthDetailService
@@ -146,10 +147,8 @@ class DiskGrowthDetailService
     }
 
     /**
-     * Get file storage growth contributors in a specific directory.
-     */
     /**
-     * Get file storage growth contributors in a specific directory.
+     * Get file storage growth contributors in a specific directory using database-side aggregation.
      */
     public function getFileGrowth(MonitoredServer $server, string $date, string $directory): array
     {
@@ -157,93 +156,109 @@ class DiskGrowthDetailService
         $targetDate = Carbon::parse($date)->format('Y-m-d');
         $dirPrefix = rtrim($directory, '/') . '/';
 
-        // Fetch file snapshots for target date that belong to the subtree of $directory
-        $targetSnapshots = DiskFileSnapshot::where('server_id', $server->id)
+        // 1. Lightweight lookup for latest target snapshot timestamp
+        $latestTargetAt = DB::table('disk_file_snapshots')
+            ->where('server_id', $server->id)
             ->whereDate('snapshot_at', $targetDate)
-            ->where(function ($query) use ($directory, $dirPrefix) {
-                $query->where('file_path', 'like', $dirPrefix . '%')
+            ->max('snapshot_at');
+
+        // Fallback: If no stored file snapshot, execute SSH live command
+        if (!$latestTargetAt) {
+            $targetFilesMap = $this->fetchLiveFilesForDirectory($server, $directory);
+            return $this->formatLiveFilesResult($server, $directory, $targetDate, $targetFilesMap);
+        }
+
+        // 2. Lightweight lookup for previous snapshot timestamp
+        $latestTargetCarbon = Carbon::parse($latestTargetAt);
+        $prevSnapshotAt = DB::table('disk_file_snapshots')
+            ->where('server_id', $server->id)
+            ->where('snapshot_at', '<', $latestTargetCarbon->copy()->startOfDay())
+            ->max('snapshot_at');
+
+        if (!$prevSnapshotAt) {
+            $prevSnapshotAt = DB::table('disk_file_snapshots')
+                ->where('server_id', $server->id)
+                ->where('snapshot_at', '<', $latestTargetAt)
+                ->max('snapshot_at');
+        }
+
+        $hasPrev = $prevSnapshotAt ? 1 : 0;
+        $maxPrevDepth = 0;
+
+        if ($prevSnapshotAt) {
+            $maxPrevDepthVal = DB::table('disk_file_snapshots')
+                ->where('server_id', $server->id)
+                ->where('snapshot_at', $prevSnapshotAt)
+                ->where(function ($q) use ($directory, $dirPrefix) {
+                    $q->where('file_path', 'like', $dirPrefix . '%')
                       ->orWhere('file_path', '=', $directory)
                       ->orWhere('directory_path', '=', $directory)
                       ->orWhere('directory_path', 'like', $dirPrefix . '%');
-            })
-            ->orderBy('snapshot_at', 'desc')
-            ->get();
+                })
+                ->selectRaw("MAX(LENGTH(file_path) - LENGTH(REPLACE(file_path, '/', ''))) as max_depth")
+                ->value('max_depth');
 
-        // If no file snapshot stored for this subtree, execute SSH command for selected directory
-        if ($targetSnapshots->isEmpty()) {
-            $targetFilesMap = $this->fetchLiveFilesForDirectory($server, $directory);
-            $prevFilesMap = collect();
-            $prevSnapshotAt = null;
-        } else {
-            $latestTargetAt = $targetSnapshots->first()->snapshot_at;
-            $targetFilesMap = $targetSnapshots->where('snapshot_at', $latestTargetAt)->keyBy('file_path');
-
-            // Find previous snapshot timestamp for this server prior to target date
-            $prevSnapshotAt = DiskFileSnapshot::where('server_id', $server->id)
-                ->where('snapshot_at', '<', $latestTargetAt->copy()->startOfDay())
-                ->orderBy('snapshot_at', 'desc')
-                ->value('snapshot_at');
-
-            if (!$prevSnapshotAt) {
-                $prevSnapshotAt = DiskFileSnapshot::where('server_id', $server->id)
-                    ->where('snapshot_at', '<', $latestTargetAt)
-                    ->orderBy('snapshot_at', 'desc')
-                    ->value('snapshot_at');
-            }
-
-            $prevFilesMap = collect();
-            if ($prevSnapshotAt) {
-                $prevFilesMap = DiskFileSnapshot::where('server_id', $server->id)
-                    ->where('snapshot_at', $prevSnapshotAt)
-                    ->where(function ($query) use ($directory, $dirPrefix) {
-                        $query->where('file_path', 'like', $dirPrefix . '%')
-                              ->orWhere('file_path', '=', $directory)
-                              ->orWhere('directory_path', '=', $directory)
-                              ->orWhere('directory_path', 'like', $dirPrefix . '%');
-                    })
-                    ->get()
-                    ->keyBy('file_path');
-            }
+            $maxPrevDepth = $maxPrevDepthVal !== null ? (int) $maxPrevDepthVal : 0;
         }
 
-        $fileResults = [];
+        // 3. Database JOIN & CASE computation: returns max 15 rows directly from database
+        $query = DB::table('disk_file_snapshots as cur')
+            ->where('cur.server_id', $server->id)
+            ->where('cur.snapshot_at', $latestTargetAt)
+            ->where(function ($q) use ($directory, $dirPrefix) {
+                $q->where('cur.file_path', 'like', $dirPrefix . '%')
+                  ->orWhere('cur.file_path', '=', $directory)
+                  ->orWhere('cur.directory_path', '=', $directory)
+                  ->orWhere('cur.directory_path', 'like', $dirPrefix . '%');
+            });
 
-        foreach ($targetFilesMap as $filePath => $item) {
-            $currentSize = is_object($item) && isset($item->size_bytes) ? (int) $item->size_bytes : (int) $item;
-            
-            if ($prevSnapshotAt !== null) {
-                if ($prevFilesMap->has($filePath)) {
-                    $prevItem = $prevFilesMap->get($filePath);
-                    $previousSize = is_object($prevItem) && isset($prevItem->size_bytes) ? (int) $prevItem->size_bytes : 0;
-                    $growth = $currentSize - $previousSize;
-                    $previousSizeFormatted = $this->formatBytes($previousSize);
-                    $growthFormatted = $this->growthService->formatGrowth($growth);
-                } else {
-                    if ($this->isSnapshotCoverageComparable($filePath, $prevFilesMap)) {
-                        // Genuinely new file in a comparable snapshot coverage/depth
-                        $previousSize = 0;
-                        $growth = $currentSize;
-                        $previousSizeFormatted = '0 B';
-                        $growthFormatted = $this->growthService->formatGrowth($growth);
-                    } else {
-                        // File missing because previous snapshot coverage/depth was not comparable
-                        $previousSize = null;
-                        $growth = null;
-                        $previousSizeFormatted = 'N/A';
-                        $growthFormatted = 'N/A';
-                    }
-                }
-            } else {
-                // Previous snapshot is NOT available
-                $previousSize = null;
-                $growth = null;
-                $previousSizeFormatted = 'N/A';
-                $growthFormatted = 'N/A';
-            }
+        if ($prevSnapshotAt) {
+            $query->leftJoin('disk_file_snapshots as prev', function ($join) use ($server, $prevSnapshotAt) {
+                $join->on('prev.file_path', '=', 'cur.file_path')
+                     ->where('prev.server_id', '=', $server->id)
+                     ->where('prev.snapshot_at', '=', $prevSnapshotAt);
+            });
+
+            $prevSizeSql = "CASE
+                WHEN prev.size_bytes IS NOT NULL THEN prev.size_bytes
+                WHEN {$maxPrevDepth} > 0 AND (LENGTH(cur.file_path) - LENGTH(REPLACE(cur.file_path, '/', ''))) <= {$maxPrevDepth} THEN 0
+                ELSE NULL
+            END";
+
+            $growthSql = "CASE
+                WHEN prev.size_bytes IS NOT NULL THEN (cur.size_bytes - prev.size_bytes)
+                WHEN {$maxPrevDepth} > 0 AND (LENGTH(cur.file_path) - LENGTH(REPLACE(cur.file_path, '/', ''))) <= {$maxPrevDepth} THEN cur.size_bytes
+                ELSE NULL
+            END";
+        } else {
+            $prevSizeSql = "NULL";
+            $growthSql = "NULL";
+        }
+
+        $rows = $query->select([
+                'cur.file_path',
+                'cur.size_bytes as current_size_bytes',
+                DB::raw("{$prevSizeSql} as previous_size_bytes"),
+                DB::raw("{$growthSql} as growth_bytes"),
+            ])
+            ->orderByRaw("CASE WHEN ({$growthSql}) IS NOT NULL THEN 0 ELSE 1 END ASC")
+            ->orderByRaw("({$growthSql}) DESC")
+            ->orderBy('cur.size_bytes', 'desc')
+            ->limit(15)
+            ->get();
+
+        $fileResults = [];
+        foreach ($rows as $row) {
+            $currentSize = (int) $row->current_size_bytes;
+            $previousSize = $row->previous_size_bytes !== null ? (int) $row->previous_size_bytes : null;
+            $growth = $row->growth_bytes !== null ? (int) $row->growth_bytes : null;
+
+            $previousSizeFormatted = $previousSize !== null ? $this->formatBytes($previousSize) : 'N/A';
+            $growthFormatted = $growth !== null ? $this->growthService->formatGrowth($growth) : 'N/A';
 
             $fileResults[] = new StorageGrowthFileData(
-                path: $filePath,
-                filename: basename($filePath),
+                path: $row->file_path,
+                filename: basename($row->file_path),
                 currentSizeBytes: $currentSize,
                 previousSizeBytes: $previousSize,
                 growthBytes: $growth,
@@ -253,26 +268,33 @@ class DiskGrowthDetailService
             );
         }
 
-        // Sort by growthBytes DESC; if growth is null ('N/A'), fallback to currentSizeBytes DESC
-        usort($fileResults, function ($a, $b) {
-            if ($a->growthBytes !== null && $b->growthBytes !== null) {
-                if ($a->growthBytes === $b->growthBytes) {
-                    return $b->currentSizeBytes <=> $a->currentSizeBytes;
-                }
-                return $b->growthBytes <=> $a->growthBytes;
-            }
-            if ($a->growthBytes !== null) return -1;
-            if ($b->growthBytes !== null) return 1;
-            return $b->currentSizeBytes <=> $a->currentSizeBytes;
-        });
-
-        // Limit to top 15 files
-        $topFiles = array_slice($fileResults, 0, 15);
-
         return [
             'directory' => $directory,
             'date' => $targetDate,
-            'files' => array_map(fn($f) => $f->toArray(), $topFiles),
+            'files' => array_map(fn($f) => $f->toArray(), $fileResults),
+        ];
+    }
+
+    private function formatLiveFilesResult(MonitoredServer $server, string $directory, string $targetDate, \Illuminate\Support\Collection $targetFilesMap): array
+    {
+        $fileResults = [];
+        foreach ($targetFilesMap as $filePath => $item) {
+            $currentSize = is_object($item) && isset($item->size_bytes) ? (int) $item->size_bytes : (int) $item;
+            $fileResults[] = new StorageGrowthFileData(
+                path: $filePath,
+                filename: basename($filePath),
+                currentSizeBytes: $currentSize,
+                previousSizeBytes: null,
+                growthBytes: null,
+                currentSizeFormatted: $this->formatBytes($currentSize),
+                previousSizeFormatted: 'N/A',
+                growthFormatted: 'N/A'
+            );
+        }
+        return [
+            'directory' => $directory,
+            'date' => $targetDate,
+            'files' => array_map(fn($f) => $f->toArray(), array_slice($fileResults, 0, 15)),
         ];
     }
 
