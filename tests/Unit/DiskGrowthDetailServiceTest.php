@@ -9,6 +9,7 @@ use App\Models\DiskFileSnapshot;
 use App\Services\Monitoring\DiskGrowthDetailService;
 use App\Services\Monitoring\DiskStorageGrowthService;
 use App\Services\Monitoring\RemoteCommandService;
+use App\Services\Monitoring\Support\PostgreSqlCommandBuilder;
 use App\Domain\Monitoring\Data\RemoteCommandResult;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,13 +30,15 @@ class DiskGrowthDetailServiceTest extends TestCase
             'name' => 'growth-detail-test-server',
             'hostname' => '127.0.0.1',
             'web_server' => 'nginx',
+            'postgres_port' => 5432,
             'is_active' => true,
         ]);
         
         $storageGrowthService = new DiskStorageGrowthService();
         $commands = $this->createMock(RemoteCommandService::class);
         $commands->method('execute')->willReturn(new RemoteCommandResult(false, '', null));
-        $this->service = new DiskGrowthDetailService($storageGrowthService, $commands);
+        $builder = new PostgreSqlCommandBuilder();
+        $this->service = new DiskGrowthDetailService($storageGrowthService, $commands, $builder);
     }
 
     public function test_directory_growth_delta_calculation_with_valid_previous_snapshot()
@@ -355,30 +358,113 @@ class DiskGrowthDetailServiceTest extends TestCase
         $this->assertEquals('/srv', $result['directories'][0]['path']);
     }
 
-    public function test_postgresql_oid_extracted_and_mapped_to_database_name()
+    public function test_postgresql_oid_extracted_and_mapped_for_server_with_custom_port_and_cluster()
     {
+        $server1 = MonitoredServer::create([
+            'name' => 'legacy-pg92-server',
+            'hostname' => '10.0.0.1',
+            'web_server' => 'nginx',
+            'postgres_port' => 5433,
+            'is_active' => true,
+        ]);
+
         $targetDate = Carbon::parse('2026-09-10 12:00:00');
         $directory = '/var/lib/postgresql';
-        $filePath = '/var/lib/postgresql/18/main/base/26965/27361';
+        $filePath = '/var/lib/postgresql/9.2/main92/base/193071/520109';
 
         DiskFileSnapshot::create([
-            'server_id' => $this->server->id,
+            'server_id' => $server1->id,
             'directory_path' => dirname($filePath),
             'file_path' => $filePath,
             'size_bytes' => 50000000,
             'snapshot_at' => $targetDate,
         ]);
 
+        $builder = new PostgreSqlCommandBuilder();
+        $expectedCmd = $builder->build($server1, 'SELECT oid, datname FROM pg_database;');
+
         $mockCommands = $this->createMock(RemoteCommandService::class);
         $mockCommands->expects($this->once())
             ->method('execute')
-            ->willReturn(new RemoteCommandResult(true, "26965,exapro_mutif_02052021_2\n13408,postgres", null));
+            ->with($server1, $expectedCmd)
+            ->willReturn(new RemoteCommandResult(true, "193071|exapro_mutif_02052021_2\n13408|postgres", null));
 
-        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands);
-        $result = $service->getFileGrowth($this->server, '2026-09-10', $directory);
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
+        $result = $service->getFileGrowth($server1, '2026-09-10', $directory);
 
         $this->assertNotEmpty($result['files']);
         $this->assertEquals('exapro_mutif_02052021_2', $result['files'][0]['database_name']);
+    }
+
+    public function test_postgresql_oid_extracted_and_mapped_for_server_with_standard_port()
+    {
+        $server2 = MonitoredServer::create([
+            'name' => 'modern-pg16-server',
+            'hostname' => '10.0.0.2',
+            'web_server' => 'nginx',
+            'postgres_port' => 5432,
+            'is_active' => true,
+        ]);
+
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+        $filePath = '/var/lib/postgresql/16/main/base/16384/24581';
+
+        DiskFileSnapshot::create([
+            'server_id' => $server2->id,
+            'directory_path' => dirname($filePath),
+            'file_path' => $filePath,
+            'size_bytes' => 1073741824,
+            'snapshot_at' => $targetDate,
+        ]);
+
+        $builder = new PostgreSqlCommandBuilder();
+        $expectedCmd = $builder->build($server2, 'SELECT oid, datname FROM pg_database;');
+
+        $mockCommands = $this->createMock(RemoteCommandService::class);
+        $mockCommands->expects($this->once())
+            ->method('execute')
+            ->with($server2, $expectedCmd)
+            ->willReturn(new RemoteCommandResult(true, "16384|sip_mutif_db\n13408|postgres", null));
+
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
+        $result = $service->getFileGrowth($server2, '2026-09-10', $directory);
+
+        $this->assertNotEmpty($result['files']);
+        $this->assertEquals('sip_mutif_db', $result['files'][0]['database_name']);
+    }
+
+    public function test_server_without_postgres_port_returns_unknown_database_without_running_ssh()
+    {
+        $serverNoPg = MonitoredServer::create([
+            'name' => 'web-only-server',
+            'hostname' => '10.0.0.3',
+            'web_server' => 'nginx',
+            'postgres_port' => 0,
+            'is_active' => true,
+        ]);
+
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+        $filePath = '/var/lib/postgresql/16/main/base/16384/24581';
+
+        DiskFileSnapshot::create([
+            'server_id' => $serverNoPg->id,
+            'directory_path' => dirname($filePath),
+            'file_path' => $filePath,
+            'size_bytes' => 50000000,
+            'snapshot_at' => $targetDate,
+        ]);
+
+        $builder = new PostgreSqlCommandBuilder();
+        $mockCommands = $this->createMock(RemoteCommandService::class);
+        $mockCommands->expects($this->never())->method('execute');
+
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
+        $result = $service->getFileGrowth($serverNoPg, '2026-09-10', $directory);
+
+        $this->assertNotEmpty($result['files']);
+        $this->assertEquals('Unknown', $result['files'][0]['database_name']);
     }
 
     public function test_non_postgresql_path_does_not_have_database_name()
@@ -395,10 +481,11 @@ class DiskGrowthDetailServiceTest extends TestCase
             'snapshot_at' => $targetDate,
         ]);
 
+        $builder = new PostgreSqlCommandBuilder();
         $mockCommands = $this->createMock(RemoteCommandService::class);
         $mockCommands->expects($this->never())->method('execute');
 
-        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands);
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
         $result = $service->getFileGrowth($this->server, '2026-09-10', $directory);
 
         $this->assertNotEmpty($result['files']);
@@ -419,12 +506,13 @@ class DiskGrowthDetailServiceTest extends TestCase
             'snapshot_at' => $targetDate,
         ]);
 
+        $builder = new PostgreSqlCommandBuilder();
         $mockCommands = $this->createMock(RemoteCommandService::class);
         $mockCommands->expects($this->once())
             ->method('execute')
-            ->willReturn(new RemoteCommandResult(true, "26965,exapro_mutif_02052021_2\n13408,postgres", null));
+            ->willReturn(new RemoteCommandResult(true, "26965|exapro_mutif_02052021_2\n13408|postgres", null));
 
-        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands);
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
         $result = $service->getFileGrowth($this->server, '2026-09-10', $directory);
 
         $this->assertNotEmpty($result['files']);
@@ -445,12 +533,13 @@ class DiskGrowthDetailServiceTest extends TestCase
             'snapshot_at' => $targetDate,
         ]);
 
+        $builder = new PostgreSqlCommandBuilder();
         $mockCommands = $this->createMock(RemoteCommandService::class);
         $mockCommands->expects($this->once())
             ->method('execute')
             ->willThrowException(new \RuntimeException('SSH connection timeout'));
 
-        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands);
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
         $result = $service->getFileGrowth($this->server, '2026-09-10', $directory);
 
         $this->assertNotEmpty($result['files']);

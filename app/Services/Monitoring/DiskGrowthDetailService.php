@@ -8,6 +8,7 @@ use App\Models\MonitoredServer;
 use App\Services\Monitoring\DTO\StorageGrowthDirectoryData;
 use App\Services\Monitoring\DTO\StorageGrowthFileData;
 use App\Services\Monitoring\RemoteCommandService;
+use App\Services\Monitoring\Support\PostgreSqlCommandBuilder;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Support\Facades\DB;
@@ -17,7 +18,8 @@ class DiskGrowthDetailService
 {
     public function __construct(
         private readonly DiskStorageGrowthService $growthService,
-        private readonly RemoteCommandService $commands
+        private readonly RemoteCommandService $commands,
+        private readonly PostgreSqlCommandBuilder $postgresCommandBuilder,
     ) {}
 
     /**
@@ -339,6 +341,10 @@ class DiskGrowthDetailService
      */
     public function fetchPostgresDatabaseOidMap(MonitoredServer $server, array $filePaths): array
     {
+        if (empty($server->postgres_port)) {
+            return [];
+        }
+
         $oids = [];
         foreach ($filePaths as $path) {
             if (preg_match('/\/var\/lib\/postgresql\/(?:[^\/]+\/)+base\/(\d+)(?:\/|$)/', $path, $m)) {
@@ -352,20 +358,27 @@ class DiskGrowthDetailService
 
         $oidMap = [];
         try {
-            $cmd = "sudo -u postgres psql -t -A -F ',' -c \"SELECT oid, datname FROM pg_database;\" 2>/dev/null";
-            $result = $this->commands->execute($server, $cmd);
+            $sql = 'SELECT oid, datname FROM pg_database;';
+            $command = $this->postgresCommandBuilder->build($server, $sql);
+            $result = $this->commands->execute($server, $command);
 
-            if ($result->successful && !empty($result->output)) {
+            if ($result && $result->successful && !empty($result->output)) {
                 $lines = explode("\n", trim($result->output));
                 foreach ($lines as $line) {
                     $line = trim($line);
-                    if (preg_match('/^(\d+),(.*)$/', $line, $m)) {
-                        $oidMap[$m[1]] = trim($m[2]);
+                    if (empty($line)) {
+                        continue;
+                    }
+                    $parts = explode('|', $line);
+                    if (count($parts) >= 2) {
+                        $oid = trim($parts[0]);
+                        $datname = trim($parts[1]);
+                        $oidMap[$oid] = $datname;
                     }
                 }
             }
         } catch (Exception $e) {
-            logger()->warning("Failed to fetch PostgreSQL database OID map: " . $e->getMessage());
+            logger()->warning("Failed to fetch PostgreSQL database OID map for server {$server->name}: " . $e->getMessage());
         }
 
         return $oidMap;
