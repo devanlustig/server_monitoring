@@ -5,6 +5,7 @@ namespace App\Services\Monitoring;
 use App\Models\DiskDirectorySnapshot;
 use App\Models\DiskFileSnapshot;
 use App\Models\MonitoredServer;
+use App\Services\Monitoring\DTO\StorageGrowthDatabaseData;
 use App\Services\Monitoring\DTO\StorageGrowthDirectoryData;
 use App\Services\Monitoring\DTO\StorageGrowthFileData;
 use App\Services\Monitoring\RemoteCommandService;
@@ -297,11 +298,105 @@ class DiskGrowthDetailService
             );
         }
 
+        $databases = str_contains($directory, 'postgresql') ? $this->getDatabaseGrowth($server, $targetDate) : [];
+
         return [
             'directory' => $directory,
             'date' => $targetDate,
+            'databases' => array_map(fn($d) => $d->toArray(), $databases),
             'files' => array_map(fn($f) => $f->toArray(), $fileResults),
         ];
+    }
+
+    /**
+     * Get database storage growth contributors for a server on a specific date using database-side aggregation.
+     */
+    public function getDatabaseGrowth(MonitoredServer $server, string $date): array
+    {
+        if (empty($server->postgres_port)) {
+            return [];
+        }
+
+        $targetDate = Carbon::parse($date)->format('Y-m-d');
+
+        // 1. Database-side lookup for latest target snapshot timestamp on target date
+        $latestTargetAt = DB::table('postgresql_database_size_snapshots')
+            ->where('server_id', $server->id)
+            ->whereDate('snapshot_at', $targetDate)
+            ->max('snapshot_at');
+
+        if (!$latestTargetAt) {
+            return [];
+        }
+
+        // 2. Database-side lookup for previous baseline snapshot timestamp
+        $latestTargetCarbon = Carbon::parse($latestTargetAt);
+        $prevSnapshotAt = DB::table('postgresql_database_size_snapshots')
+            ->where('server_id', $server->id)
+            ->where('snapshot_at', '<', $latestTargetCarbon->copy()->startOfDay())
+            ->max('snapshot_at');
+
+        if (!$prevSnapshotAt) {
+            $prevSnapshotAt = DB::table('postgresql_database_size_snapshots')
+                ->where('server_id', $server->id)
+                ->where('snapshot_at', '<', $latestTargetAt)
+                ->max('snapshot_at');
+        }
+
+        // 3. Database-side JOIN: computes growth for current snapshot vs preceding baseline snapshot
+        $query = DB::table('postgresql_database_size_snapshots as cur')
+            ->where('cur.server_id', $server->id)
+            ->where('cur.snapshot_at', $latestTargetAt);
+
+        if ($prevSnapshotAt) {
+            $query->leftJoin('postgresql_database_size_snapshots as prev', function ($join) use ($server, $prevSnapshotAt) {
+                $join->on('prev.database_oid', '=', 'cur.database_oid')
+                     ->where('prev.server_id', '=', $server->id)
+                     ->where('prev.snapshot_at', '=', $prevSnapshotAt);
+            });
+
+            $prevSizeSql = "CASE WHEN prev.size_bytes IS NOT NULL THEN prev.size_bytes ELSE 0 END";
+            $growthSql = "CASE WHEN prev.size_bytes IS NOT NULL THEN (cur.size_bytes - prev.size_bytes) ELSE cur.size_bytes END";
+        } else {
+            $prevSizeSql = "NULL";
+            $growthSql = "NULL";
+        }
+
+        $rows = $query->select([
+                'cur.database_oid',
+                'cur.database_name',
+                'cur.size_bytes as current_size_bytes',
+                DB::raw("{$prevSizeSql} as previous_size_bytes"),
+                DB::raw("{$growthSql} as growth_bytes"),
+            ])
+            ->orderByRaw("CASE WHEN ({$growthSql}) IS NOT NULL THEN 0 ELSE 1 END ASC")
+            ->orderByRaw("({$growthSql}) DESC")
+            ->orderBy('cur.size_bytes', 'desc')
+            ->limit(10)
+            ->get();
+
+        $databaseResults = [];
+        foreach ($rows as $row) {
+            $currentSize = (int) $row->current_size_bytes;
+            $previousSize = $row->previous_size_bytes !== null ? (int) $row->previous_size_bytes : null;
+            $growth = $row->growth_bytes !== null ? (int) $row->growth_bytes : null;
+
+            $previousSizeFormatted = $previousSize !== null ? $this->formatBytes($previousSize) : 'N/A';
+            $growthFormatted = $growth !== null ? $this->growthService->formatGrowth($growth) : 'N/A';
+
+            $databaseResults[] = new StorageGrowthDatabaseData(
+                databaseOid: $row->database_oid,
+                databaseName: $row->database_name,
+                currentSizeBytes: $currentSize,
+                previousSizeBytes: $previousSize,
+                growthBytes: $growth,
+                currentSizeFormatted: $this->formatBytes($currentSize),
+                previousSizeFormatted: $previousSizeFormatted,
+                growthFormatted: $growthFormatted
+            );
+        }
+
+        return $databaseResults;
     }
 
     private function formatLiveFilesResult(MonitoredServer $server, string $directory, string $targetDate, \Illuminate\Support\Collection $targetFilesMap): array
@@ -325,9 +420,13 @@ class DiskGrowthDetailService
                 databaseName: $databaseName
             );
         }
+
+        $databases = str_contains($directory, 'postgresql') ? $this->getDatabaseGrowth($server, $targetDate) : [];
+
         return [
             'directory' => $directory,
             'date' => $targetDate,
+            'databases' => array_map(fn($d) => $d->toArray(), $databases),
             'files' => array_map(fn($f) => $f->toArray(), $fileResults),
         ];
     }
@@ -357,6 +456,28 @@ class DiskGrowthDetailService
         }
 
         $oidMap = [];
+
+        // Check if database OIDs exist in stored postgresql_database_size_snapshots first
+        try {
+            $dbRows = DB::table('postgresql_database_size_snapshots')
+                ->where('server_id', $server->id)
+                ->whereIn('database_oid', array_keys($oids))
+                ->select('database_oid', 'database_name')
+                ->distinct()
+                ->get();
+
+            foreach ($dbRows as $r) {
+                $oidMap[$r->database_oid] = $r->database_name;
+            }
+        } catch (Exception $e) {
+            // Ignore snapshot table error and fall back to SSH command
+        }
+
+        $missingOids = array_diff(array_keys($oids), array_keys($oidMap));
+        if (empty($missingOids)) {
+            return $oidMap;
+        }
+
         try {
             $sql = 'SELECT oid, datname FROM pg_database;';
             $command = $this->postgresCommandBuilder->build($server, $sql);

@@ -6,6 +6,7 @@ use Tests\TestCase;
 use App\Models\MonitoredServer;
 use App\Models\DiskDirectorySnapshot;
 use App\Models\DiskFileSnapshot;
+use App\Models\PostgresqlDatabaseSizeSnapshot;
 use App\Services\Monitoring\DiskGrowthDetailService;
 use App\Services\Monitoring\DiskStorageGrowthService;
 use App\Services\Monitoring\RemoteCommandService;
@@ -544,5 +545,134 @@ class DiskGrowthDetailServiceTest extends TestCase
 
         $this->assertNotEmpty($result['files']);
         $this->assertEquals('Unknown', $result['files'][0]['database_name']);
+    }
+
+    public function test_postgresql_database_growth_positive_zero_and_new_database()
+    {
+        $prevDate = Carbon::parse('2026-09-09 12:00:00');
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        // DB 1: Growing database (100 MB -> 500 MB = +400 MB)
+        PostgresqlDatabaseSizeSnapshot::create(['server_id' => $this->server->id, 'database_oid' => '10001', 'database_name' => 'db_growing', 'size_bytes' => 100000000, 'snapshot_at' => $prevDate]);
+        PostgresqlDatabaseSizeSnapshot::create(['server_id' => $this->server->id, 'database_oid' => '10001', 'database_name' => 'db_growing', 'size_bytes' => 500000000, 'snapshot_at' => $targetDate]);
+
+        // DB 2: Static database (50 MB -> 50 MB = 0 B)
+        PostgresqlDatabaseSizeSnapshot::create(['server_id' => $this->server->id, 'database_oid' => '10002', 'database_name' => 'db_static', 'size_bytes' => 50000000, 'snapshot_at' => $prevDate]);
+        PostgresqlDatabaseSizeSnapshot::create(['server_id' => $this->server->id, 'database_oid' => '10002', 'database_name' => 'db_static', 'size_bytes' => 50000000, 'snapshot_at' => $targetDate]);
+
+        // DB 3: Brand new database created on target date (0 B -> 200 MB = +200 MB)
+        PostgresqlDatabaseSizeSnapshot::create(['server_id' => $this->server->id, 'database_oid' => '10003', 'database_name' => 'db_new', 'size_bytes' => 200000000, 'snapshot_at' => $targetDate]);
+
+        $mockCommands = $this->createMock(RemoteCommandService::class);
+        $mockCommands->method('execute')->willReturn(new RemoteCommandResult(false, '', null));
+        $builder = new PostgreSqlCommandBuilder();
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
+
+        $result = $service->getFileGrowth($this->server, '2026-09-10', $directory);
+
+        $this->assertArrayHasKey('databases', $result);
+        $this->assertCount(3, $result['databases']);
+
+        // Sorted by growth DESC: db_growing (+400 MB) -> db_new (+200 MB) -> db_static (0 B)
+        $db1 = $result['databases'][0];
+        $this->assertEquals('db_growing', $db1['databaseName']);
+        $this->assertEquals(400000000, $db1['growthBytes']);
+
+        $db2 = $result['databases'][1];
+        $this->assertEquals('db_new', $db2['databaseName']);
+        $this->assertEquals(0, $db2['previousSizeBytes']);
+        $this->assertEquals('0 B', $db2['previousSizeFormatted']);
+        $this->assertEquals(200000000, $db2['growthBytes']);
+
+        $db3 = $result['databases'][2];
+        $this->assertEquals('db_static', $db3['databaseName']);
+        $this->assertEquals(50000000, $db3['previousSizeBytes']);
+        $this->assertEquals(0, $db3['growthBytes']);
+    }
+
+    public function test_postgresql_database_growth_no_baseline_returns_null_previous_and_growth()
+    {
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+        $directory = '/var/lib/postgresql';
+
+        PostgresqlDatabaseSizeSnapshot::create(['server_id' => $this->server->id, 'database_oid' => '10001', 'database_name' => 'db_first_time', 'size_bytes' => 500000000, 'snapshot_at' => $targetDate]);
+
+        $mockCommands = $this->createMock(RemoteCommandService::class);
+        $mockCommands->method('execute')->willReturn(new RemoteCommandResult(false, '', null));
+        $builder = new PostgreSqlCommandBuilder();
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
+
+        $result = $service->getFileGrowth($this->server, '2026-09-10', $directory);
+
+        $this->assertArrayHasKey('databases', $result);
+        $this->assertCount(1, $result['databases']);
+        $this->assertNull($result['databases'][0]['previousSizeBytes']);
+        $this->assertNull($result['databases'][0]['growthBytes']);
+        $this->assertEquals('N/A', $result['databases'][0]['previousSizeFormatted']);
+        $this->assertEquals('N/A', $result['databases'][0]['growthFormatted']);
+    }
+
+    public function test_postgresql_database_growth_only_returned_for_postgresql_directory()
+    {
+        $targetDate = Carbon::parse('2026-09-10 12:00:00');
+
+        PostgresqlDatabaseSizeSnapshot::create(['server_id' => $this->server->id, 'database_oid' => '10001', 'database_name' => 'db_test', 'size_bytes' => 500000000, 'snapshot_at' => $targetDate]);
+
+        $mockCommands = $this->createMock(RemoteCommandService::class);
+        $mockCommands->method('execute')->willReturn(new RemoteCommandResult(false, '', null));
+        $builder = new PostgreSqlCommandBuilder();
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
+
+        // Non-postgresql directory like /var/log/nginx
+        $result = $service->getFileGrowth($this->server, '2026-09-10', '/var/log/nginx');
+
+        $this->assertArrayHasKey('databases', $result);
+        $this->assertEmpty($result['databases']);
+    }
+
+    public function test_large_dataset_postgresql_database_growth_memory_efficiency()
+    {
+        $baseDate = Carbon::parse('2026-09-10 12:00:00');
+
+        // Insert 10,000 database snapshot rows in bulk chunks across 3 days
+        $rows = [];
+        for ($day = 0; $day < 3; $day++) {
+            $dayDate = $baseDate->copy()->subDays($day);
+            for ($run = 0; $run < 100; $run++) {
+                $snapshotAt = $dayDate->copy()->subMinutes($run * 2);
+                for ($db = 1; $db <= 35; $db++) {
+                    $rows[] = [
+                        'server_id' => $this->server->id,
+                        'database_oid' => (string) (10000 + $db),
+                        'database_name' => "app_db_{$db}",
+                        'size_bytes' => 100000000 + ((2 - $day) * 10000000) + ($db * 100000),
+                        'snapshot_at' => $snapshotAt->toDateTimeString(),
+                    ];
+                }
+            }
+        }
+
+        foreach (array_chunk($rows, 1000) as $chunk) {
+            DB::table('postgresql_database_size_snapshots')->insert($chunk);
+        }
+
+        $mockCommands = $this->createMock(RemoteCommandService::class);
+        $mockCommands->method('execute')->willReturn(new RemoteCommandResult(false, '', null));
+        $builder = new PostgreSqlCommandBuilder();
+        $service = new DiskGrowthDetailService(new DiskStorageGrowthService(), $mockCommands, $builder);
+
+        $startMemory = memory_get_usage();
+
+        $result = $service->getFileGrowth($this->server, '2026-09-10', '/var/lib/postgresql');
+
+        $endMemory = memory_get_usage();
+        $memoryDelta = $endMemory - $startMemory;
+
+        $this->assertNotEmpty($result['databases']);
+        // Returns strictly capped top 10 databases by growth
+        $this->assertCount(10, $result['databases']);
+        // Memory delta must be minimal (< 3 MB) due to database-side LIMIT and JOIN
+        $this->assertLessThan(3 * 1024 * 1024, $memoryDelta);
     }
 }

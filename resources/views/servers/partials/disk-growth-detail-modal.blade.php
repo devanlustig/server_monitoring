@@ -55,20 +55,48 @@
 
                 <!-- Files View (Level 2) -->
                 <div id="disk-modal-level2" style="display: none;">
-                    <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0 border rounded">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Top File Growth</th>
-                                    <th class="text-end">Current Size</th>
-                                    <th class="text-end">Previous Size</th>
-                                    <th class="text-end">Growth Delta</th>
-                                </tr>
-                            </thead>
-                            <tbody id="disk-files-tbody">
-                                <!-- Populated dynamically -->
-                            </tbody>
-                        </table>
+                    <!-- PostgreSQL Database Growth Table -->
+                    <div id="disk-databases-section" class="mb-4" style="display: none;">
+                        <h6 class="fw-bold text-dark mb-2">
+                            <i class="bi bi-database text-primary me-2"></i>PostgreSQL Database Growth
+                        </h6>
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0 border rounded">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Database</th>
+                                        <th class="text-end">Current Size</th>
+                                        <th class="text-end">Previous Size</th>
+                                        <th class="text-end">Growth Delta</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="disk-databases-tbody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Top File Growth Table -->
+                    <div id="disk-files-section">
+                        <h6 class="fw-bold text-dark mb-2" id="disk-files-heading">
+                            <i class="bi bi-file-earmark-bar-graph text-secondary me-2"></i>Top File Growth
+                        </h6>
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0 border rounded">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Top File Growth</th>
+                                        <th class="text-end">Current Size</th>
+                                        <th class="text-end">Previous Size</th>
+                                        <th class="text-end">Growth Delta</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="disk-files-tbody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -192,6 +220,44 @@
 
                 document.getElementById('disk-current-dir-label').innerText = directory;
 
+                // Handle Database Growth Section
+                const dbSection = document.getElementById('disk-databases-section');
+                const dbTbody = document.getElementById('disk-databases-tbody');
+                dbTbody.innerHTML = '';
+
+                if (data.databases && data.databases.length > 0) {
+                    data.databases.forEach(db => {
+                        const tr = document.createElement('tr');
+                        let growthHtml = '';
+                        if (db.growthBytes === null) {
+                            growthHtml = `<span class="badge bg-light text-secondary border">N/A</span>`;
+                        } else if (db.growthBytes > 0) {
+                            growthHtml = `<span class="text-danger fw-bold"><i class="bi bi-arrow-up-right me-1"></i>${db.growthFormatted}</span>`;
+                        } else if (db.growthBytes < 0) {
+                            growthHtml = `<span class="text-success fw-bold"><i class="bi bi-arrow-down-right me-1"></i>${db.growthFormatted}</span>`;
+                        } else {
+                            growthHtml = `<span class="text-muted">${db.growthFormatted}</span>`;
+                        }
+
+                        let prevSizeHtml = db.previousSizeBytes === null ? `<span class="badge bg-light text-secondary border">N/A</span>` : db.previousSizeFormatted;
+
+                        tr.innerHTML = `
+                            <td>
+                                <div class="fw-semibold text-dark">${escapeHtml(db.databaseName)}</div>
+                                <div class="text-muted small">OID: ${escapeHtml(db.databaseOid)}</div>
+                            </td>
+                            <td class="text-end text-muted small">${db.currentSizeFormatted}</td>
+                            <td class="text-end text-muted small">${prevSizeHtml}</td>
+                            <td class="text-end">${growthHtml}</td>
+                        `;
+                        dbTbody.appendChild(tr);
+                    });
+                    dbSection.style.display = 'block';
+                } else {
+                    dbSection.style.display = 'none';
+                }
+
+                // Handle Top File Growth Section
                 if (!data.files || data.files.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-4"><i class="bi bi-info-circle me-1"></i>No file growth snapshot available for this directory.</td></tr>`;
                 } else {

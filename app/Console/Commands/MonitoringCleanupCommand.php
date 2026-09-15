@@ -47,6 +47,10 @@ class MonitoringCleanupCommand extends Command
             'column' => 'snapshot_at',
             'days' => 12,
         ],
+        'postgresql_database_size_snapshots' => [
+            'column' => 'snapshot_at',
+            'days' => 30,
+        ],
     ];
 
     public function handle(): int
