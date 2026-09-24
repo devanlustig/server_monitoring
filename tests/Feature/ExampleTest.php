@@ -10,6 +10,14 @@ class ExampleTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        \App\Models\User::factory()->create(['id' => 1]);
+        $user = \App\Models\AuthorizedEmail::factory()->create();
+        $this->actingAs($user);
+    }
+
     /**
      * A basic test example.
      */

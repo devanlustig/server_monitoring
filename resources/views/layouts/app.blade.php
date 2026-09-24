@@ -30,9 +30,21 @@
 <body class="bg-body-tertiary">
     <nav class="navbar navbar-dark bg-dark shadow-sm">
         <div class="container">
-            <a class="navbar-brand fw-semibold" href="{{ route('dashboard') }}">Server Monitoring</a>
-            <a class="nav-link d-inline-block text-white-50" href="{{ route('servers.index') }}">Servers</a>
-            <a class="nav-link d-inline-block text-white-50" href="{{ route('cpu.dashboard') }}">CPU</a>
+            <div class="d-flex align-items-center gap-3">
+                <a class="navbar-brand fw-semibold m-0" href="{{ route('dashboard') }}">Server Monitoring</a>
+                <a class="nav-link d-inline-block text-white-50" href="{{ route('servers.index') }}">Servers</a>
+                <a class="nav-link d-inline-block text-white-50" href="{{ route('cpu.dashboard') }}">CPU</a>
+            </div>
+            
+            @auth
+                <div class="d-flex align-items-center gap-3">
+                    <span class="text-white-50">{{ Auth::user()->name }}</span>
+                    <form action="{{ route('logout') }}" method="POST" class="d-inline">
+                        @csrf
+                        <button type="submit" class="btn btn-outline-secondary btn-sm text-white">Logout</button>
+                    </form>
+                </div>
+            @endauth
         </div>
     </nav>
     <main class="container py-4">@yield('content')</main>
