@@ -48,4 +48,9 @@ Route::middleware('auth')->group(function () {
     // Disk Storage Growth Detail Routes
     Route::get('/servers/{server}/disk/growth-detail', [\App\Http\Controllers\DiskGrowthDetailController::class, 'getDirectories'])->name('servers.disk.growth-detail');
     Route::get('/servers/{server}/disk/growth-detail/files', [\App\Http\Controllers\DiskGrowthDetailController::class, 'getFiles'])->name('servers.disk.growth-detail-files');
+
+    // Protect Local Storage
+    Route::get('/storage/{path}', function (string $path) {
+        return \Illuminate\Support\Facades\Storage::disk('local')->response($path);
+    })->where('path', '.*')->name('storage.local');
 });
