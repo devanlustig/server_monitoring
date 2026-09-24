@@ -13,7 +13,6 @@ class ExampleTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        \App\Models\User::factory()->create(['id' => 1]);
         $user = \App\Models\AuthorizedEmail::factory()->create();
         $this->actingAs($user);
     }

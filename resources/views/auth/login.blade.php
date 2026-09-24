@@ -11,7 +11,7 @@
         <div class="card-body text-center p-4">
             <h4 class="card-title fw-bold mb-3">Server Monitoring</h4>
             <p class="text-muted mb-4">
-                Gunakan akun Google yang telah didaftarkan pada Master Email.
+                Silahkan Login
             </p>
 
             @if(session('error'))

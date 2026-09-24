@@ -59,7 +59,7 @@ class PerformanceMonitor
                 2
             ),
             'ip_address' => $request->ip(),
-            'user_id' => auth()->id(),
+            'user_id' => (auth()->check() && auth()->user() instanceof \App\Models\User) ? auth()->id() : null,
             'is_slow' => $duration >= 500,
             'created_at' => now(),
         ]);

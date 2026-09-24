@@ -10,15 +10,6 @@ class GoogleSsoAuthTest extends TestCase
 {
     use \Illuminate\Foundation\Testing\RefreshDatabase;
 
-    protected function setUp(): void
-    {
-        parent::setUp();
-        // Create a dummy user to satisfy application_request_logs foreign key constraint
-        // because auth()->id() will now map to authorized_emails but the log table
-        // expects it in the users table.
-        \App\Models\User::factory()->create(['id' => 1]);
-    }
-
     public function test_guest_is_redirected_to_login()
     {
         $response = $this->get('/');
