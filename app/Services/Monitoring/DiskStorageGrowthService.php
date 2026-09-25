@@ -18,23 +18,17 @@ class DiskStorageGrowthService
      */
     public function getDailyGrowth(MonitoredServer $server, int $days = 5): array
     {
-        // 1. Group by calendar date in database and get max(collected_at) per date
-        $latestPerDateSub = DB::table('disk_metrics')
+        // 1. Assign row numbers partitioned by date, ordered by latest snapshot first (with id DESC as tie-breaker)
+        $rankedSnapshots = DB::table('disk_metrics')
             ->where('server_id', $server->id)
             ->whereNotNull('used')
-            ->selectRaw("DATE(collected_at) as snapshot_date, MAX(collected_at) as max_collected_at")
-            ->groupByRaw("DATE(collected_at)");
+            ->selectRaw("DATE(collected_at) as date, used, collected_at, ROW_NUMBER() OVER (PARTITION BY server_id, DATE(collected_at) ORDER BY collected_at DESC, id DESC) as rn");
 
-        // 2. Join back to get the latest snapshot row per date, limit to ($days + 1)
-        $dailyMetrics = DB::table('disk_metrics as m')
-            ->joinSub($latestPerDateSub, 'latest', function ($join) use ($server) {
-                $join->on('m.collected_at', '=', 'latest.max_collected_at')
-                     ->where('m.server_id', '=', $server->id);
-            })
-            ->where('m.server_id', $server->id)
-            ->whereNotNull('m.used')
-            ->select(['latest.snapshot_date as date', 'm.used', 'm.collected_at'])
-            ->orderBy('m.collected_at', 'desc')
+        // 2. Select only the latest snapshot (rn = 1) for each date
+        $dailyMetrics = DB::query()
+            ->fromSub($rankedSnapshots, 'latest')
+            ->where('rn', 1)
+            ->orderBy('date', 'desc')
             ->limit($days + 1)
             ->get();
 
