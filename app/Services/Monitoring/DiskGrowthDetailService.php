@@ -130,8 +130,20 @@ class DiskGrowthDetailService
             );
         }
 
-        // Sort by growthBytes DESC (put nulls at the end, sorted by currentSizeBytes)
-        usort($directoryResults, function ($a, $b) {
+        // Separate into positive (growth) and negative (reduction)
+        $growthDirs = [];
+        $reductionDirs = [];
+
+        foreach ($directoryResults as $dir) {
+            if ($dir->growthBytes === null || $dir->growthBytes >= 0) {
+                $growthDirs[] = $dir;
+            } else {
+                $reductionDirs[] = $dir;
+            }
+        }
+
+        // Sort growthDirs by growthBytes DESC
+        usort($growthDirs, function ($a, $b) {
             if ($a->growthBytes !== null && $b->growthBytes !== null) {
                 if ($a->growthBytes === $b->growthBytes) {
                     return $b->currentSizeBytes <=> $a->currentSizeBytes;
@@ -143,16 +155,39 @@ class DiskGrowthDetailService
             return $b->currentSizeBytes <=> $a->currentSizeBytes;
         });
 
-        // Limit to top 10 directories
-        $topDirectories = array_slice($directoryResults, 0, 10);
+        // Sort reductionDirs by growthBytes ASC (most negative first)
+        usort($reductionDirs, function ($a, $b) {
+            return $a->growthBytes <=> $b->growthBytes;
+        });
 
-        // Add 'Other' entry if totalGrowthBytes > 0 and sum of top directories < totalGrowthBytes
-        $topSum = array_sum(array_map(fn($d) => max(0, $d->growthBytes ?? 0), $topDirectories));
-        $otherGrowth = max(0, $totalGrowthBytes - $topSum);
+        // Limit to top 10
+        // Limit to top 10
+        $topGrowthDirectories = array_slice($growthDirs, 0, 10);
+        $topReductionDirectories = array_slice($reductionDirs, 0, 10);
 
-        if ($otherGrowth > 0 && count($topDirectories) > 0) {
-            $topDirectories[] = new StorageGrowthDirectoryData(
-                path: 'Other (unclassified storage)',
+        // Calculate sums for the equation
+        $totalPositiveTracked = array_sum(array_map(fn($d) => $d->growthBytes, $growthDirs));
+        $totalNegativeTracked = array_sum(array_map(fn($d) => $d->growthBytes, $reductionDirs));
+        
+        $topGrowthSum = array_sum(array_map(fn($d) => $d->growthBytes, $topGrowthDirectories));
+        $topReductionSum = array_sum(array_map(fn($d) => $d->growthBytes, $topReductionDirectories));
+
+        // Untracked Net is the residual between overall disk growth and total tracked directory growth
+        $untrackedNet = $totalGrowthBytes - ($totalPositiveTracked + $totalNegativeTracked);
+        
+        // Distribute untracked net safely without cross-cancellation
+        $untrackedPositive = max(0, $untrackedNet);
+        $untrackedNegative = min(0, $untrackedNet);
+        
+        $totalPositiveGrowth = $totalPositiveTracked + $untrackedPositive;
+        $totalNegativeGrowth = $totalNegativeTracked + $untrackedNegative;
+        
+        $otherGrowth = $totalPositiveGrowth - $topGrowthSum;
+        $otherReduction = $totalNegativeGrowth - $topReductionSum;
+
+        if ($otherGrowth > 0 && count($topGrowthDirectories) > 0) {
+            $topGrowthDirectories[] = new StorageGrowthDirectoryData(
+                path: 'Other (unclassified growth)',
                 currentSizeBytes: 0,
                 previousSizeBytes: 0,
                 growthBytes: $otherGrowth,
@@ -162,12 +197,25 @@ class DiskGrowthDetailService
             );
         }
 
+        if ($otherReduction < 0 && count($topReductionDirectories) > 0) {
+            $topReductionDirectories[] = new StorageGrowthDirectoryData(
+                path: 'Other (unclassified reduction)',
+                currentSizeBytes: 0,
+                previousSizeBytes: 0,
+                growthBytes: $otherReduction,
+                currentSizeFormatted: '-',
+                previousSizeFormatted: '-',
+                growthFormatted: $this->growthService->formatGrowth($otherReduction)
+            );
+        }
+
         return [
             'date' => $targetDate,
             'dateFormatted' => $dateFormatted,
             'totalGrowthBytes' => $totalGrowthBytes,
             'totalGrowthFormatted' => $this->growthService->formatGrowth($totalGrowthBytes),
-            'directories' => array_map(fn($d) => $d->toArray(), $topDirectories),
+            'growthDirectories' => array_map(fn($d) => $d->toArray(), $topGrowthDirectories),
+            'reductionDirectories' => array_map(fn($d) => $d->toArray(), $topReductionDirectories),
         ];
     }
 

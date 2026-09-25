@@ -163,37 +163,54 @@
                 const tbody = document.getElementById('disk-directories-tbody');
                 tbody.innerHTML = '';
 
-                if (!data.directories || data.directories.length === 0) {
+                if ((!data.growthDirectories || data.growthDirectories.length === 0) && (!data.reductionDirectories || data.reductionDirectories.length === 0)) {
                     tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-info-circle me-1"></i>No directory growth snapshot available for this date.</td></tr>`;
                 } else {
-                    data.directories.forEach(dir => {
-                        const tr = document.createElement('tr');
-                        const isOther = dir.path.startsWith('Other');
+                    const renderRows = (dirs, sectionTitle, isReduction) => {
+                        if (dirs.length === 0) return;
                         
-                        let growthHtml = '';
-                        if (dir.growthBytes === null) {
-                            growthHtml = `<span class="badge bg-light text-secondary border">N/A</span>`;
-                        } else if (dir.growthBytes > 0) {
-                            growthHtml = `<span class="text-danger fw-bold"><i class="bi bi-arrow-up-right me-1"></i>${dir.growthFormatted}</span>`;
-                        } else if (dir.growthBytes < 0) {
-                            growthHtml = `<span class="text-success fw-bold"><i class="bi bi-arrow-down-right me-1"></i>${dir.growthFormatted}</span>`;
-                        } else {
-                            growthHtml = `<span class="text-muted">${dir.growthFormatted}</span>`;
-                        }
-
-                        let prevSizeHtml = dir.previousSizeBytes === null ? `<span class="badge bg-light text-secondary border">N/A</span>` : dir.previousSizeFormatted;
-
-                        tr.innerHTML = `
-                            <td class="fw-semibold text-dark text-break">${dir.path}</td>
-                            <td class="text-end text-muted small">${dir.currentSizeFormatted}</td>
-                            <td class="text-end text-muted small">${prevSizeHtml}</td>
-                            <td class="text-end">${growthHtml}</td>
-                            <td class="text-center">
-                                ${!isOther ? `<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 btn-inspect-dir" data-path="${escapeHtml(dir.path)}" title="Inspect Top Files"><i class="bi bi-chevron-right"></i></button>` : ''}
+                        // Add section header row
+                        const headerTr = document.createElement('tr');
+                        headerTr.className = 'table-light';
+                        headerTr.innerHTML = `
+                            <td colspan="5" class="fw-bold text-dark border-bottom-0 pt-3 pb-2">
+                                <i class="bi ${isReduction ? 'bi-arrow-down-circle text-success' : 'bi-arrow-up-circle text-danger'} me-2"></i>${sectionTitle}
                             </td>
                         `;
-                        tbody.appendChild(tr);
-                    });
+                        tbody.appendChild(headerTr);
+
+                        dirs.forEach(dir => {
+                            const tr = document.createElement('tr');
+                            const isOther = dir.path.startsWith('Other');
+                            
+                            let growthHtml = '';
+                            if (dir.growthBytes === null) {
+                                growthHtml = `<span class="badge bg-light text-secondary border">N/A</span>`;
+                            } else if (dir.growthBytes > 0) {
+                                growthHtml = `<span class="text-danger fw-bold"><i class="bi bi-arrow-up-right me-1"></i>${dir.growthFormatted}</span>`;
+                            } else if (dir.growthBytes < 0) {
+                                growthHtml = `<span class="text-success fw-bold"><i class="bi bi-arrow-down-right me-1"></i>${dir.growthFormatted}</span>`;
+                            } else {
+                                growthHtml = `<span class="text-muted">${dir.growthFormatted}</span>`;
+                            }
+
+                            let prevSizeHtml = dir.previousSizeBytes === null ? `<span class="badge bg-light text-secondary border">N/A</span>` : dir.previousSizeFormatted;
+
+                            tr.innerHTML = `
+                                <td class="fw-semibold text-dark text-break ps-4">${dir.path}</td>
+                                <td class="text-end text-muted small">${dir.currentSizeFormatted}</td>
+                                <td class="text-end text-muted small">${prevSizeHtml}</td>
+                                <td class="text-end">${growthHtml}</td>
+                                <td class="text-center">
+                                    ${!isOther ? `<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 btn-inspect-dir" data-path="${escapeHtml(dir.path)}" title="Inspect Top Files"><i class="bi bi-chevron-right"></i></button>` : ''}
+                                </td>
+                            `;
+                            tbody.appendChild(tr);
+                        });
+                    };
+
+                    renderRows(data.growthDirectories || [], 'TOP DIRECTORY GROWTH', false);
+                    renderRows(data.reductionDirectories || [], 'TOP DIRECTORY REDUCTION', true);
                 }
 
                 showLevel1();

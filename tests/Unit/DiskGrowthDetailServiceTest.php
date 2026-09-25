@@ -59,10 +59,10 @@ class DiskGrowthDetailServiceTest extends TestCase
 
         $result = $this->service->getDirectoryGrowth($this->server, '2026-09-10');
 
-        $this->assertNotEmpty($result['directories']);
-        $this->assertEquals('/var/lib/postgresql', $result['directories'][0]['path']);
-        $this->assertEquals(1000000000, $result['directories'][0]['previousSizeBytes']);
-        $this->assertEquals(1500000000, $result['directories'][0]['growthBytes']);
+        $this->assertNotEmpty($result['growthDirectories']);
+        $this->assertEquals('/var/lib/postgresql', $result['growthDirectories'][0]['path']);
+        $this->assertEquals(1000000000, $result['growthDirectories'][0]['previousSizeBytes']);
+        $this->assertEquals(1500000000, $result['growthDirectories'][0]['growthBytes']);
     }
 
     public function test_directory_without_previous_snapshot_returns_null_previous_size_and_null_growth()
@@ -74,13 +74,13 @@ class DiskGrowthDetailServiceTest extends TestCase
 
         $result = $this->service->getDirectoryGrowth($this->server, '2026-09-10');
 
-        $this->assertNotEmpty($result['directories']);
-        $this->assertEquals('/var/lib/postgresql', $result['directories'][0]['path']);
+        $this->assertNotEmpty($result['growthDirectories']);
+        $this->assertEquals('/var/lib/postgresql', $result['growthDirectories'][0]['path']);
         // Must NOT default to 0 B or compute +87.6 GB fake growth!
-        $this->assertNull($result['directories'][0]['previousSizeBytes']);
-        $this->assertNull($result['directories'][0]['growthBytes']);
-        $this->assertEquals('N/A', $result['directories'][0]['previousSizeFormatted']);
-        $this->assertEquals('N/A', $result['directories'][0]['growthFormatted']);
+        $this->assertNull($result['growthDirectories'][0]['previousSizeBytes']);
+        $this->assertNull($result['growthDirectories'][0]['growthBytes']);
+        $this->assertEquals('N/A', $result['growthDirectories'][0]['previousSizeFormatted']);
+        $this->assertEquals('N/A', $result['growthDirectories'][0]['growthFormatted']);
     }
 
     public function test_file_growth_delta_calculation_and_top_15_limit()
@@ -352,11 +352,11 @@ class DiskGrowthDetailServiceTest extends TestCase
         $endMemory = memory_get_usage();
         $memoryDelta = $endMemory - $startMemory;
 
-        $this->assertNotEmpty($result['directories']);
+        $this->assertNotEmpty($result['growthDirectories']);
         // Memory delta must be minimal (< 3 MB) because only single timestamp rows are fetched
         $this->assertLessThan(3 * 1024 * 1024, $memoryDelta);
         // Correct leaf paths selected
-        $this->assertEquals('/srv', $result['directories'][0]['path']);
+        $this->assertEquals('/srv', $result['growthDirectories'][0]['path']);
     }
 
     public function test_postgresql_oid_extracted_and_mapped_for_server_with_custom_port_and_cluster()
