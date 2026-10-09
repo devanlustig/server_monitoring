@@ -202,3 +202,4 @@
 
 @include('servers.partials.cpu-chart-script')
 @include('servers.partials.disk-growth-detail-modal')
+@include('servers.partials.memory-detail-modal')

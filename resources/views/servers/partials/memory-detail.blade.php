@@ -1,8 +1,9 @@
 <!-- Memory Breakdown -->
 <div class="col-lg-6">
-    <div class="card shadow-sm border-0 h-100">
-        <div class="card-header bg-white pt-4 pb-3 border-bottom">
+    <div class="card shadow-sm border-0 h-100" style="cursor: pointer;" onclick="openMemoryDetailModal({{ $server->id }})">
+        <div class="card-header bg-white pt-4 pb-3 border-bottom d-flex justify-content-between align-items-center">
             <h5 class="mb-0 fw-bold"><i class="bi bi-memory text-info me-2"></i>Memory Metrics</h5>
+            <span class="badge bg-light text-secondary border"><i class="bi bi-search me-1"></i>View Detail</span>
         </div>
         <div class="card-body">
             @if($latestMemory)

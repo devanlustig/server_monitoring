@@ -20,5 +20,5 @@ yarn-error.log
 /.idea
 /.nova
 /.vscode
-/.zed
 .aider*
+google_secret
