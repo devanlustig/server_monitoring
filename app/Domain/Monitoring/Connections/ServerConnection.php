@@ -11,7 +11,9 @@ interface ServerConnection
 {
     public function test(MonitoredServer $server): ConnectionTestResult;
 
-    public function execute(MonitoredServer $server, string $command): RemoteCommandResult;
+    public function execute(MonitoredServer $server, string $command, int $timeoutSeconds = 15): RemoteCommandResult;
 
-    public function executeMany(MonitoredServer $server,array $commands): BatchCommandResult;
+    public function executeMany(MonitoredServer $server, array $commands, int $timeoutSeconds = 15): BatchCommandResult;
+
+    public function disconnect(): void;
 }

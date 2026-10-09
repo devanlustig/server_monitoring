@@ -25,15 +25,52 @@ class SshPasswordConnection implements ServerConnection
         }
     }
 
-    public function execute(MonitoredServer $server,string $command): RemoteCommandResult { try { $ssh=$this->connect($server); $output=$ssh->exec($command); return new RemoteCommandResult(true,$output,null); } catch(Throwable $e) { return new RemoteCommandResult(false,null,$e->getMessage()); } }
+    public function execute(MonitoredServer $server, string $command, int $timeoutSeconds = 15): RemoteCommandResult 
+    { 
+        try { 
+            $ssh = $this->connect($server); 
+            $ssh->setTimeout($timeoutSeconds); 
+            $output = $ssh->exec($command); 
+            if ($ssh->isTimeout()) { 
+                $this->disconnect(); // reset dirty channel
+                throw new \RuntimeException('SSH execution timed out.'); 
+            } 
+            return new RemoteCommandResult(true, $output, null); 
+        } catch(Throwable $e) { 
+            return new RemoteCommandResult(false, null, $e->getMessage()); 
+        } 
+    }
 
-    private function connect(MonitoredServer $server): SSH2 { for($attempt=1;$attempt<=5;$attempt++){ $ssh=new SSH2($server->hostname,(int)$server->ssh_port,10); if(!$ssh->login($server->ssh_username,$server->ssh_password)) throw new \RuntimeException('SSH login failed.'); try { @$ssh->exec('true'); $this->ssh=$ssh; $this->connectedServerId=$server->id; return $ssh; } catch(\Throwable $e) { if($attempt===5) throw $e; usleep(500000); } } throw new \RuntimeException('SSH connection failed.'); }
+    private function connect(MonitoredServer $server): SSH2 { 
+        if ($this->ssh && $this->connectedServerId === $server->id) {
+            if ($this->ssh->isConnected()) return $this->ssh;
+        }
+        $this->disconnect();
 
-    public function executeMany(MonitoredServer $server,array $commands): BatchCommandResult
+        for($attempt=1;$attempt<=5;$attempt++){ 
+            $ssh=new SSH2($server->hostname,(int)$server->ssh_port,10); 
+            if(!$ssh->login($server->ssh_username,$server->ssh_password)) throw new \RuntimeException('SSH login failed.'); 
+            try { 
+                $ssh->setTimeout(15);
+                @$ssh->exec('true'); 
+                if ($ssh->isTimeout()) throw new \RuntimeException('SSH connection verification timed out.');
+                $this->ssh=$ssh; 
+                $this->connectedServerId=$server->id; 
+                return $ssh; 
+            } catch(\Throwable $e) { 
+                if($attempt===5) throw $e; 
+                usleep(500000); 
+            } 
+        } 
+        throw new \RuntimeException('SSH connection failed.'); 
+    }
+
+    public function executeMany(MonitoredServer $server, array $commands, int $timeoutSeconds = 15): BatchCommandResult
     {
         try {
-            $ssh=$this->connect($server);
-            $script='';
+            $ssh = $this->connect($server);
+            $ssh->setTimeout($timeoutSeconds);
+            $script = '';
             foreach($commands as $key=>$command) {
                 $script.="echo '__BEGIN__{$key}__'\n";
                 $script.="(\n";
@@ -41,10 +78,23 @@ class SshPasswordConnection implements ServerConnection
                 $script.=")\n";
                 $script.="echo '__END__{$key}__'\n";
             }
-            $output=$ssh->exec($script);
+            $output = $ssh->exec($script);
+            if ($ssh->isTimeout()) { 
+                $this->disconnect(); // reset dirty channel
+                throw new \RuntimeException('SSH execution timed out.'); 
+            }
             return new BatchCommandResult($this->parseBatchOutput($output));
         } catch(Throwable $e) {
             throw $e;
+        }
+    }
+
+    public function disconnect(): void
+    {
+        if ($this->ssh) {
+            @$this->ssh->disconnect();
+            $this->ssh = null;
+            $this->connectedServerId = null;
         }
     }
 
@@ -54,5 +104,10 @@ class SshPasswordConnection implements ServerConnection
         preg_match_all('/__BEGIN__(.*?)__([\s\S]*?)__END__\\1__/',$output,$matches,PREG_SET_ORDER);
         foreach($matches as $match) $results[$match[1]]=trim($match[2]);
         return $results;
+    }
+
+    public function __destruct()
+    {
+        $this->disconnect();
     }
 }

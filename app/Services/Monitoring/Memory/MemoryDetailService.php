@@ -22,7 +22,7 @@ class MemoryDetailService
         ];
 
         try {
-            $batchResult = $this->commands->executeMany($server, $commands);
+            $batchResult = $this->commands->executeMany($server, $commands, 15);
         } catch (Exception $e) {
             Log::error('SSH connection failed for Memory Detail', [
                 'server_id' => $server->id,
@@ -32,6 +32,10 @@ class MemoryDetailService
                 'success' => false,
                 'message' => 'Failed to connect to server: ' . $e->getMessage(),
             ];
+        } finally {
+            try {
+                $this->commands->disconnect($server);
+            } catch (\Throwable) {}
         }
 
         $freeOutput = $batchResult->get('free');

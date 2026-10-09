@@ -21,7 +21,7 @@ class DiskFilesystemCollector
         // 1. Collect Directory Sizes
         try {
             $dirCmd = 'du -b --max-depth=2 /var /home /usr /opt /tmp /etc /root /srv /www 2>/dev/null';
-            $dirResult = $this->commands->execute($server, $dirCmd);
+            $dirResult = $this->commands->execute($server, $dirCmd, 120);
 
             if ($dirResult->successful && !empty($dirResult->output)) {
                 $lines = explode("\n", trim($dirResult->output));
@@ -47,7 +47,7 @@ class DiskFilesystemCollector
         // 2. Collect Top File Sizes
         try {
             $fileCmd = '(find /var/lib/postgresql /var/lib/mysql -maxdepth 8 -type f -printf "%s %p\n" 2>/dev/null; find /var/lib /var/log /var/www /home /tmp /opt /srv -maxdepth 5 -type f -printf "%s %p\n" 2>/dev/null) | sort -rn | head -150';
-            $fileResult = $this->commands->execute($server, $fileCmd);
+            $fileResult = $this->commands->execute($server, $fileCmd, 120);
 
             if ($fileResult->successful && !empty($fileResult->output)) {
                 $lines = explode("\n", trim($fileResult->output));

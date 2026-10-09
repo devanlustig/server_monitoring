@@ -12,13 +12,18 @@ class RemoteCommandService
 {
     public function __construct(private readonly ServerConnectionFactory $connections) {}
 
-    public function execute(MonitoredServer $server, string $command): RemoteCommandResult
+    public function execute(MonitoredServer $server, string $command, int $timeoutSeconds = 15): RemoteCommandResult
     {
-        return $this->connections->for($server)->execute($server, $command);
+        return $this->connections->for($server)->execute($server, $command, $timeoutSeconds);
     }
 
-    public function executeMany(MonitoredServer $server,array $commands): BatchCommandResult
+    public function executeMany(MonitoredServer $server, array $commands, int $timeoutSeconds = 15): BatchCommandResult
     {
-        return $this->connections->for($server)->executeMany($server, $commands);
+        return $this->connections->for($server)->executeMany($server, $commands, $timeoutSeconds);
+    }
+
+    public function disconnect(MonitoredServer $server): void
+    {
+        $this->connections->for($server)->disconnect();
     }
 }

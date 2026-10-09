@@ -210,4 +210,24 @@ SwapFree:        15000 kB";
         $this->assertEquals(30000 * 1024, $breakdown['used']);
         $this->assertEquals(5000 * 1024, $breakdown['swap_used']);
     }
+    public function test_disconnect_is_called_even_on_exception()
+    {
+        $server = Mockery::mock(MonitoredServer::class)->makePartial();
+        $server->id = 1;
+
+        $remoteCommands = Mockery::mock(RemoteCommandService::class);
+        $remoteCommands->shouldReceive('executeMany')
+            ->once()
+            ->andThrow(new Exception('Some error'));
+            
+        $remoteCommands->shouldReceive('disconnect')
+            ->once()
+            ->with($server);
+
+        $service = new MemoryDetailService($remoteCommands);
+        $service->getMemoryDetail($server);
+        
+        // Assertion handled by Mockery
+        $this->assertTrue(true);
+    }
 }

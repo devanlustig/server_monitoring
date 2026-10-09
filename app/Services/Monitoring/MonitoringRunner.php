@@ -9,6 +9,7 @@ use App\Services\Monitoring\Collectors\DiskCollector;
 use App\Services\Monitoring\Recorders\CpuMetricRecorder;
 use App\Services\Monitoring\Recorders\MemoryMetricRecorder;
 use App\Services\Monitoring\Recorders\DiskMetricRecorder;
+use App\Services\Monitoring\RemoteCommandService;
 
 class MonitoringRunner
 {
@@ -22,6 +23,7 @@ class MonitoringRunner
         private readonly DiskMetricRecorder $diskRecorder,
 
         private readonly ServerStatusService $status,
+        private readonly RemoteCommandService $remoteCommandService,
     ) {
     }
 
@@ -52,6 +54,10 @@ class MonitoringRunner
             );
 
             throw $e;
+        } finally {
+            try {
+                $this->remoteCommandService->disconnect($server);
+            } catch (\Throwable) {}
         }
     }
 }

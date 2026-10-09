@@ -30,7 +30,7 @@ WHERE datallowconn = true;
 SQL;
 
             $command = $this->builder->build($server, $sql);
-            $result = $this->commands->execute($server, $command);
+            $result = $this->commands->execute($server, $command, 60);
 
             if (!$result || !$result->successful || empty($result->output)) {
                 return;

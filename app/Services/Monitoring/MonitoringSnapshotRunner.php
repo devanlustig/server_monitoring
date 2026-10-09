@@ -3,11 +3,13 @@
 namespace App\Services\Monitoring;
 
 use App\Models\MonitoredServer;
+use App\Services\Monitoring\RemoteCommandService;
 
 class MonitoringSnapshotRunner
 {
     public function __construct(
         private readonly MetricHistoryService $historyService,
+        private readonly RemoteCommandService $commands,
     ) {}
 
     public function run(): void
@@ -20,27 +22,33 @@ class MonitoringSnapshotRunner
         );
         foreach ($servers as $server) {
             $snapshots = [];
-            foreach ($providers as $provider) {
-                try {
-                    $snapshots = array_merge(
-                        $snapshots,
-                        $provider->getSnapshots($server)
-                    );
-                } catch (\Throwable $e) {
-                    logger()->error(sprintf(
-                        'Snapshot failed [%s] on %s : %s',
-                        class_basename($provider),
-                        $server->name,
-                        $e->getMessage()
-                    ));
+            try {
+                foreach ($providers as $provider) {
+                    try {
+                        $snapshots = array_merge(
+                            $snapshots,
+                            $provider->getSnapshots($server)
+                        );
+                    } catch (\Throwable $e) {
+                        logger()->error(sprintf(
+                            'Snapshot failed [%s] on %s : %s',
+                            class_basename($provider),
+                            $server->name,
+                            $e->getMessage()
+                        ));
+                    }
                 }
-            }
 
-            if (! empty($snapshots)) {
-                $count = $this->historyService->store(
-                    $server,
-                    $snapshots
-                );
+                if (! empty($snapshots)) {
+                    $count = $this->historyService->store(
+                        $server,
+                        $snapshots
+                    );
+                }
+            } finally {
+                try {
+                    $this->commands->disconnect($server);
+                } catch (\Throwable) {}
             }
         }
     }

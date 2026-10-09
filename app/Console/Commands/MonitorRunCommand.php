@@ -13,8 +13,6 @@ class MonitorRunCommand extends Command
 
     protected $description = 'Run all monitoring collectors as a continuous daemon process';
 
-    private bool $running = true;
-
     public function __construct(
         private readonly MonitoringRunner $runner
     ) {
@@ -23,21 +21,33 @@ class MonitorRunCommand extends Command
 
     public function handle(): int
     {
-        $this->registerSignalHandlers();
-
-        $this->info('Monitoring daemon started...');
-
-        while ($this->running) {
-            $this->processServers();
-
-            if (!$this->running) {
-                break;
-            }
-
-            $this->sleep(30);
+        $lockFile = storage_path('framework/cache/monitor_run.lock');
+        
+        // Ensure directory exists
+        if (!is_dir(dirname($lockFile))) {
+            mkdir(dirname($lockFile), 0755, true);
         }
 
-        $this->info('Monitoring daemon stopped...');
+        $fp = fopen($lockFile, 'w+');
+        if (!$fp || !flock($fp, LOCK_EX | LOCK_NB)) {
+            $this->warn("Another instance of monitor:run is already running (PID: " . getmypid() . "). Skipping.");
+            return self::SUCCESS;
+        }
+
+        $startTime = microtime(true);
+        $this->info('Monitoring cycle started (PID: ' . getmypid() . ')...');
+        logger()->info('Monitoring cycle started.', ['pid' => getmypid()]);
+
+        try {
+            $this->processServers();
+        } finally {
+            $duration = round(microtime(true) - $startTime, 2);
+            $this->info("Monitoring cycle completed in {$duration}s.");
+            logger()->info("Monitoring cycle completed.", ['pid' => getmypid(), 'duration_seconds' => $duration]);
+
+            flock($fp, LOCK_UN);
+            fclose($fp);
+        }
 
         return self::SUCCESS;
     }
@@ -54,27 +64,26 @@ class MonitorRunCommand extends Command
         $this->info("Monitoring {$servers->count()} server(s)...");
 
         foreach ($servers as $server) {
-            if (!$this->running) {
-                break;
-            }
-
+            $serverStartTime = microtime(true);
             try {
                 $this->runner->run($server);
-
-                $this->line("✓ {$server->name}");
+                
+                $serverDuration = round(microtime(true) - $serverStartTime, 2);
+                $this->line("✓ {$server->name} ({$serverDuration}s)");
             } catch (Throwable $e) {
-                $this->error("✗ {$server->name}");
+                $serverDuration = round(microtime(true) - $serverStartTime, 2);
+                $this->error("✗ {$server->name} ({$serverDuration}s) - Failed");
                 $this->line($e->getMessage());
 
                 logger()->error("Failed monitoring server {$server->name} (ID: {$server->id}): {$e->getMessage()}", [
                     'server_id' => $server->id,
+                    'duration_seconds' => $serverDuration,
                     'exception' => $e,
                 ]);
             }
         }
 
         $this->newLine();
-        $this->info('Monitoring iteration completed.');
     }
 
     private function registerSignalHandlers(): void

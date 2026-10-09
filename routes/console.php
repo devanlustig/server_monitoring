@@ -17,10 +17,11 @@ Artisan::command('inspire', function () {
 
 Schedule::command('monitor:run')
     ->everyMinute()
-    ->withoutOverlapping();
+    ->withoutOverlapping(5);
 
 Schedule::command('monitor:snapshot')
-    ->everyTwoMinutes();
+    ->everyTwoMinutes()
+    ->withoutOverlapping(20);
 
 Schedule::command('monitoring:cleanup')
     ->dailyAt('01:00')
